@@ -4,6 +4,8 @@ A web-based Supabase security testing toolkit for penetration testers. Point it 
 
 Inspired by [firepwn-tool](https://github.com/0xbigshaq/firepwn-tool) (Firebase security testing), built for the Supabase ecosystem.
 
+![Photo](image.png)
+
 > **For authorized security testing only.** Always get explicit permission before testing projects you don't own.
 
 ---
@@ -22,12 +24,12 @@ Inspired by [firepwn-tool](https://github.com/0xbigshaq/firepwn-tool) (Firebase 
 
 ## Supported API Keys
 
-| Key Type | Prefix | Access Level |
-|----------|--------|--------------|
-| Publishable | `sb_publishable_` | Low privilege, schema blocked — use bruteforce |
-| Secret | `sb_secret_` | Elevated, bypasses RLS |
-| Anon (legacy JWT) | `eyJ...` with `role: anon` | Low privilege, schema accessible |
-| Service Role (legacy JWT) | `eyJ...` with `role: service_role` | Elevated, bypasses RLS |
+| Key Type                  | Prefix                             | Access Level                                   |
+| ------------------------- | ---------------------------------- | ---------------------------------------------- |
+| Publishable               | `sb_publishable_`                  | Low privilege, schema blocked — use bruteforce |
+| Secret                    | `sb_secret_`                       | Elevated, bypasses RLS                         |
+| Anon (legacy JWT)         | `eyJ...` with `role: anon`         | Low privilege, schema accessible               |
+| Service Role (legacy JWT) | `eyJ...` with `role: service_role` | Elevated, bypasses RLS                         |
 
 Key type is auto-detected from the prefix/JWT payload and displayed in the connection header.
 
@@ -59,15 +61,15 @@ Switch to the **Autopwn** tab, configure which phases to run (Database RLS, Stor
 
 ## Tech Stack
 
-| | |
-|---|---|
-| Framework | Next.js 16, React 19 |
-| Language | TypeScript 5 |
-| Styling | Tailwind CSS v4 |
-| Components | shadcn/ui (Radix primitives) |
-| Supabase | @supabase/supabase-js v2 |
-| Layout | react-resizable-panels |
-| Syntax Highlighting | prism-react-renderer |
+|                     |                              |
+| ------------------- | ---------------------------- |
+| Framework           | Next.js 16, React 19         |
+| Language            | TypeScript 5                 |
+| Styling             | Tailwind CSS v4              |
+| Components          | shadcn/ui (Radix primitives) |
+| Supabase            | @supabase/supabase-js v2     |
+| Layout              | react-resizable-panels       |
+| Syntax Highlighting | prism-react-renderer         |
 
 ## Project Structure
 
