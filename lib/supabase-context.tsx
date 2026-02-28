@@ -6,6 +6,7 @@ import {
   useContext,
   useMemo,
   useReducer,
+  useRef,
   type ReactNode,
 } from "react"
 import {
@@ -84,6 +85,8 @@ type SupabaseContextValue = SupabaseState & {
 // Initial state & reducer
 // ---------------------------------------------------------------------------
 
+const MAX_LOG_ENTRIES = 2000
+
 const initialState: SupabaseState = {
   client: null,
   initialized: false,
@@ -112,11 +115,15 @@ function reducer(state: SupabaseState, action: Action): SupabaseState {
         user: action.payload.user,
         session: action.payload.session,
       }
-    case "ADD_LOG":
+    case "ADD_LOG": {
+      const newLogs = [...state.logs, action.payload]
       return {
         ...state,
-        logs: [...state.logs, action.payload],
+        logs: newLogs.length > MAX_LOG_ENTRIES
+          ? newLogs.slice(newLogs.length - MAX_LOG_ENTRIES)
+          : newLogs,
       }
+    }
     case "CLEAR_LOGS":
       return { ...state, logs: [] }
     case "DISCONNECT":
@@ -199,12 +206,9 @@ const SupabaseContext = createContext<SupabaseContextValue | null>(null)
 // Provider
 // ---------------------------------------------------------------------------
 
-// We track the auth subscription outside React state so we can unsubscribe on
-// disconnect without stale-closure issues.
-let authUnsubscribe: (() => void) | null = null
-
 export function SupabaseProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState)
+  const authUnsubscribeRef = useRef<(() => void) | null>(null)
 
   // -- addLog -------------------------------------------------------------
   const addLog = useCallback(
@@ -231,9 +235,9 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
     async (projectUrl: string, anonKey: string) => {
       try {
         // Clean up any previous auth listener
-        if (authUnsubscribe) {
-          authUnsubscribe()
-          authUnsubscribe = null
+        if (authUnsubscribeRef.current) {
+          authUnsubscribeRef.current()
+          authUnsubscribeRef.current = null
         }
 
         const client = createClient(projectUrl, anonKey)
@@ -278,7 +282,7 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "ADD_LOG", payload: logEntry })
         })
 
-        authUnsubscribe = () => subscription.unsubscribe()
+        authUnsubscribeRef.current = () => subscription.unsubscribe()
 
         // Log success
         const successLog: LogEntry = {
@@ -321,9 +325,9 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
 
   // -- disconnect ---------------------------------------------------------
   const disconnect = useCallback(() => {
-    if (authUnsubscribe) {
-      authUnsubscribe()
-      authUnsubscribe = null
+    if (authUnsubscribeRef.current) {
+      authUnsubscribeRef.current()
+      authUnsubscribeRef.current = null
     }
     dispatch({ type: "DISCONNECT" })
   }, [])
