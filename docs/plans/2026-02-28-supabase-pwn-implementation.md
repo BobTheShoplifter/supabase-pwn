@@ -13,11 +13,13 @@
 ### Task 1: Install Dependencies
 
 **Files:**
+
 - Modify: `package.json`
 
 **Step 1: Install runtime dependencies**
 
 Run:
+
 ```bash
 npm install @supabase/supabase-js react-resizable-panels prism-react-renderer sonner next-themes
 ```
@@ -25,6 +27,7 @@ npm install @supabase/supabase-js react-resizable-panels prism-react-renderer so
 **Step 2: Install shadcn/ui components**
 
 Run each command (shadcn will create files in `components/ui/`):
+
 ```bash
 npx shadcn@latest add button card input label tabs select badge scroll-area separator dialog toast progress collapsible textarea switch tooltip dropdown-menu
 ```
@@ -46,6 +49,7 @@ git commit -m "chore: install dependencies and shadcn components"
 ### Task 2: Theme, Fonts, and Global Styles
 
 **Files:**
+
 - Modify: `app/globals.css`
 - Modify: `app/layout.tsx`
 - Create: `components/theme-provider.tsx`
@@ -53,16 +57,14 @@ git commit -m "chore: install dependencies and shadcn components"
 **Step 1: Create theme provider**
 
 Create `components/theme-provider.tsx`:
+
 ```tsx
 "use client"
 
 import * as React from "react"
 import { ThemeProvider as NextThemesProvider } from "next-themes"
 
-export function ThemeProvider({
-  children,
-  ...props
-}: React.ComponentProps<typeof NextThemesProvider>) {
+export function ThemeProvider({ children, ...props }: React.ComponentProps<typeof NextThemesProvider>) {
   return <NextThemesProvider {...props}>{children}</NextThemesProvider>
 }
 ```
@@ -74,6 +76,7 @@ Replace `app/globals.css` with dark-first theme using shadcn CSS variables. Use 
 **Step 3: Update layout.tsx**
 
 Replace `app/layout.tsx`:
+
 - Change fonts to Inter (sans) + JetBrains Mono (mono) via `next/font/google`
 - Update metadata: title "supabase-pwn", description "Supabase security testing tool"
 - Wrap body content in `<ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>`
@@ -96,6 +99,7 @@ git commit -m "feat: add dark theme, fonts, and shadcn theme variables"
 ### Task 3: Supabase Context Provider
 
 **Files:**
+
 - Create: `lib/supabase-context.tsx`
 - Create: `lib/utils.ts` (if not already created by shadcn)
 
@@ -104,6 +108,7 @@ git commit -m "feat: add dark theme, fonts, and shadcn theme variables"
 This is the core state management. Create a React context with:
 
 **Types:**
+
 ```tsx
 type LogEntry = {
   id: string
@@ -133,6 +138,7 @@ type SupabaseState = {
 ```
 
 **Context actions:**
+
 - `initialize(projectUrl: string, anonKey: string)` — Creates `createClient(url, key)`, fetches OpenAPI spec from `${url}/rest/v1/` with `apikey` header, parses tables/views/functions/columns into `SchemaInfo`, logs success
 - `addLog(type, message, data?)` — Appends a log entry with auto-generated ID and timestamp
 - `clearLogs()` — Clears all log entries
@@ -160,6 +166,7 @@ git commit -m "feat: add Supabase context provider with schema discovery"
 ### Task 4: Header Component
 
 **Files:**
+
 - Create: `components/supabase-pwn/header.tsx`
 
 **Step 1: Create header.tsx**
@@ -175,7 +182,7 @@ export function Header() {
         <h1 className="text-lg font-bold tracking-tight">supabase-pwn</h1>
       </div>
       <a
-        href="https://github.com/user/supabase-pwn"
+        href="https://github.com/BobTheShoplifter/supabase-pwn"
         target="_blank"
         rel="noopener noreferrer"
         className="text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -199,11 +206,13 @@ git commit -m "feat: add header component"
 ### Task 5: Init Form Component
 
 **Files:**
+
 - Create: `components/supabase-pwn/init-form.tsx`
 
 **Step 1: Create init-form.tsx**
 
 A client component (`"use client"`) with:
+
 - Collapsible card (uses shadcn `Collapsible`)
 - Two inputs: Project URL and Anon Key
 - "Initialize" button that calls `initialize()` from context
@@ -225,11 +234,13 @@ git commit -m "feat: add init form with localStorage persistence"
 ### Task 6: Output Log Component
 
 **Files:**
+
 - Create: `components/supabase-pwn/output-log.tsx`
 
 **Step 1: Create output-log.tsx**
 
 A client component with:
+
 - Reads `logs` from `useSupabase()` context
 - Each log entry: timestamp (HH:MM:SS.ms), color-coded icon/badge by type, message text
 - Colors: info=blue, success=green, error=red, warning=yellow
@@ -250,6 +261,7 @@ git commit -m "feat: add output log with JSON syntax highlighting"
 ### Task 7: Auth Panel Component
 
 **Files:**
+
 - Create: `components/supabase-pwn/auth-panel.tsx`
 
 **Step 1: Create auth-panel.tsx**
@@ -257,25 +269,30 @@ git commit -m "feat: add output log with JSON syntax highlighting"
 A client component with sub-tabs (using shadcn `Tabs`):
 
 **Sign Up tab:**
+
 - Email + password inputs
 - "Sign Up" button → `client.auth.signUp({ email, password })`
 - Log result (success with user ID, or error)
 
 **Sign In tab:**
+
 - Email + password inputs
 - "Sign In" button → `client.auth.signInWithPassword({ email, password })`
 - Log result
 
 **Anonymous tab:**
+
 - Single "Sign In Anonymously" button → `client.auth.signInAnonymously()`
 - Log result
 
 **OAuth tab:**
+
 - Provider dropdown (Google, GitHub, Discord, Apple, Twitter, Facebook, etc.)
 - "Sign In with {provider}" button → `client.auth.signInWithOAuth({ provider })`
 - Note: this opens a popup/redirect, may not work in all contexts
 
 **When authenticated, show below tabs:**
+
 - User email (or "Anonymous")
 - User UID with copy button
 - Role from JWT
@@ -294,6 +311,7 @@ git commit -m "feat: add auth panel with sign up, sign in, anon, and OAuth"
 ### Task 8: Database Explorer Component
 
 **Files:**
+
 - Create: `components/supabase-pwn/database-explorer.tsx`
 
 **Step 1: Create database-explorer.tsx**
@@ -301,12 +319,14 @@ git commit -m "feat: add auth panel with sign up, sign in, anon, and OAuth"
 A client component with:
 
 **Table/View selector:**
+
 - Dropdown populated from `schema.tables` and `schema.views` (from context)
 - Label which are tables vs views
 
 **Operation tabs:** Select | Insert | Update | Delete | RPC
 
 **Select operation:**
+
 - Column selector (multi-select from schema columns, default `*`)
 - Filter builder (add/remove filter rows):
   - Column dropdown + operator dropdown (eq, neq, gt, gte, lt, lte, like, ilike, is, in, contains) + value input
@@ -316,23 +336,27 @@ A client component with:
 - Results: row count + JSON syntax-highlighted output
 
 **Insert operation:**
+
 - JSON textarea for the row data
 - "Insert" button → `supabase.from(table).insert(data).select()`
 - Log result
 
 **Update operation:**
+
 - Filter section (same as Select) to target rows
 - JSON textarea for update data
 - "Update" button → `supabase.from(table).update(data).filter(...).select()`
 - Log result
 
 **Delete operation:**
+
 - Filter section to target rows
 - "Delete" button with confirmation
 - → `supabase.from(table).delete().filter(...)`
 - Log result
 
 **RPC operation:**
+
 - Function name dropdown (from `schema.functions`)
 - JSON textarea for arguments
 - "Call" button → `supabase.rpc(name, args)`
@@ -350,6 +374,7 @@ git commit -m "feat: add database explorer with CRUD and RPC"
 ### Task 9: Storage Explorer Component
 
 **Files:**
+
 - Create: `components/supabase-pwn/storage-explorer.tsx`
 
 **Step 1: Create storage-explorer.tsx**
@@ -357,6 +382,7 @@ git commit -m "feat: add database explorer with CRUD and RPC"
 A client component with:
 
 **Bucket section:**
+
 - "List Buckets" button → `supabase.storage.listBuckets()`
 - Bucket dropdown (populated after listing)
 - Shows public/private badge per bucket
@@ -364,32 +390,38 @@ A client component with:
 **Operations (after selecting a bucket):**
 
 **List Files:**
+
 - Folder path input (default empty = root)
 - Limit input (default 100)
 - "List" button → `supabase.storage.from(bucket).list(folder, { limit })`
 - Results as a file list with name, size, timestamps
 
 **Upload:**
+
 - File picker input + destination path input
 - "Upload" button → `supabase.storage.from(bucket).upload(path, file)`
 - Log result
 
 **Download:**
+
 - File path input
 - "Download" button → `supabase.storage.from(bucket).download(path)`
 - Log result (blob URL)
 
 **Delete:**
+
 - File path(s) input (comma-separated)
 - "Delete" button → `supabase.storage.from(bucket).remove([paths])`
 - Log result
 
 **Get Metadata:**
+
 - File path input
 - "Get Info" button (not a direct SDK method — use list with search, or attempt download headers)
 - Log result
 
 **URL Generators:**
+
 - "Get Public URL" → `supabase.storage.from(bucket).getPublicUrl(path)` — display URL
 - "Create Signed URL" → expiry input (seconds) + `supabase.storage.from(bucket).createSignedUrl(path, expiry)` — display URL
 
@@ -405,11 +437,13 @@ git commit -m "feat: add storage explorer with bucket and file operations"
 ### Task 10: Edge Functions Component
 
 **Files:**
+
 - Create: `components/supabase-pwn/edge-functions.tsx`
 
 **Step 1: Create edge-functions.tsx**
 
 A client component with:
+
 - Function name input (text)
 - Request body JSON textarea
 - Optional custom headers: dynamic key/value pair rows (add/remove)
@@ -429,6 +463,7 @@ git commit -m "feat: add edge functions invocation panel"
 ### Task 11: Realtime Component
 
 **Files:**
+
 - Create: `components/supabase-pwn/realtime.tsx`
 
 **Step 1: Create realtime.tsx**
@@ -436,29 +471,34 @@ git commit -m "feat: add edge functions invocation panel"
 A client component with:
 
 **Channel Manager:**
+
 - Channel name input + "Subscribe" button
 - Active channels list with "Unsubscribe" button each
 - On unmount or disconnect: unsubscribe all
 
 **Postgres Changes:**
+
 - Schema input (default "public")
 - Table dropdown (from schema)
-- Event type dropdown: INSERT, UPDATE, DELETE, * (all)
+- Event type dropdown: INSERT, UPDATE, DELETE, \* (all)
 - "Listen" button → subscribes to `postgres_changes` on selected channel
 - Incoming changes displayed in a live stream (timestamp + event type + payload)
 
 **Broadcast:**
+
 - Event name input + JSON payload textarea
 - "Send" button → `channel.send({ type: 'broadcast', event, payload })`
 - Incoming broadcasts displayed in stream
 
 **Presence:**
+
 - JSON state textarea (what to track)
 - "Track" button → `channel.track(state)`
 - "Untrack" button → `channel.untrack()`
 - Current presence state display (synced from `presence.sync` events)
 
 **Live Event Stream:**
+
 - Scrolling list of all received events (changes, broadcasts, presence)
 - Timestamp + event type badge + payload
 
@@ -474,6 +514,7 @@ git commit -m "feat: add realtime subscriptions panel"
 ### Task 12: Autopwn Scanner Component
 
 **Files:**
+
 - Create: `components/supabase-pwn/autopwn.tsx`
 
 **Step 1: Create autopwn.tsx**
@@ -481,6 +522,7 @@ git commit -m "feat: add realtime subscriptions panel"
 A client component with the automated security scanner. This is the most complex component.
 
 **Configuration section:**
+
 - Phase toggles (checkboxes):
   - Database RLS Testing (default on)
   - Storage Scanning (default on)
@@ -494,10 +536,12 @@ A client component with the automated security scanner. This is the most complex
 **Scanning logic:**
 
 Phase 1 — Reconnaissance:
+
 - Already done at init (OpenAPI spec parsed into schema)
 - Display discovered tables, views, and functions count
 
 Phase 2 — Database RLS Testing:
+
 - For each table in `schema.tables`:
   - Test SELECT: `supabase.from(table).select('*').limit(1)` — record success (data returned) or error (RLS denied)
   - If write testing enabled:
@@ -508,21 +552,25 @@ Phase 2 — Database RLS Testing:
 - Track progress: current/total tables
 
 Phase 3 — Storage Scanning:
+
 - `supabase.storage.listBuckets()` — record each bucket name + public/private
 - For each bucket:
   - `supabase.storage.from(bucket).list('', { limit: 5 })` — record if file listing succeeds
   - If public: try accessing a file via public URL
 
 Phase 4 — Auth Probing:
+
 - Test if signup is open: `supabase.auth.signUp({ email: 'probe-<random>@test.invalid', password: 'ProbeTest123!' })` — record if account creation succeeds or is disabled
 - Test anonymous auth: `supabase.auth.signInAnonymously()` — record if enabled
 - Clean up: sign out after probing
 
 Phase 5 — Edge Function Discovery:
+
 - Try common function names: `hello`, `test`, `api`, `webhook`, `stripe-webhook`, `send-email`, `notify`, `process`, `auth`, `admin`
 - For each: `supabase.functions.invoke(name)` — record status code (200 = exists, 404 = not found, 401 = exists but unauthorized)
 
 **Results display:**
+
 - Collapsible sections per phase
 - Permission matrix table per phase:
   - Database: Table name | SELECT | INSERT | UPDATE | DELETE — each cell is a badge: Allowed (green), Denied (red), Error (yellow), Skipped (gray)
@@ -532,6 +580,7 @@ Phase 5 — Edge Function Discovery:
 - Overall summary: X tables accessible, Y buckets exposed, Z auth issues
 
 **Progress:**
+
 - Progress bar with phase label
 - Current item being tested
 - Abort ref to cancel in-flight operations
@@ -548,6 +597,7 @@ git commit -m "feat: add autopwn automated security scanner"
 ### Task 13: Main Page Assembly
 
 **Files:**
+
 - Modify: `app/page.tsx`
 - Modify: `app/layout.tsx`
 
@@ -612,16 +662,12 @@ export default function Home() {
                   </TabsContent>
                 </Tabs>
               ) : (
-                <div className="flex h-full items-center justify-center text-muted-foreground">
-                  Initialize a Supabase project to get started
-                </div>
+                <div className="flex h-full items-center justify-center text-muted-foreground">Initialize a Supabase project to get started</div>
               )}
             </ResizablePanel>
             <ResizableHandle withHandle />
             <ResizablePanel defaultSize={30} minSize={20} maxSize={40}>
-              {state.initialized ? (
-                <AuthPanel />
-              ) : null}
+              {state.initialized ? <AuthPanel /> : null}
             </ResizablePanel>
           </ResizablePanelGroup>
         </ResizablePanel>

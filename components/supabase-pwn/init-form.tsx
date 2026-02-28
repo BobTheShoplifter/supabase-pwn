@@ -49,11 +49,11 @@ function saveConfig(projectUrl: string, apiKey: string) {
 }
 
 const KEY_TYPE_LABELS: Record<string, { label: string; color: string }> = {
-  publishable: { label: "Publishable", color: "bg-blue-600" },
-  secret: { label: "Secret", color: "bg-red-600" },
-  anon: { label: "Anon (JWT)", color: "bg-stone-600" },
-  service_role: { label: "Service Role (JWT)", color: "bg-orange-600" },
-  unknown: { label: "Unknown", color: "bg-stone-500" },
+  publishable: { label: "Publishable", color: "bg-sky-600" },
+  secret: { label: "Secret", color: "bg-red-500" },
+  anon: { label: "Anon (JWT)", color: "bg-slate-600" },
+  service_role: { label: "Service Role (JWT)", color: "bg-amber-600" },
+  unknown: { label: "Unknown", color: "bg-slate-500" },
 }
 
 function clearConfig() {
@@ -130,7 +130,7 @@ export function InitForm() {
               <CardTitle className="text-sm">Supabase Connection</CardTitle>
               {initialized && (
                 <>
-                  <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">
+                  <Badge className="bg-primary text-primary-foreground hover:bg-primary">
                     Connected
                   </Badge>
                   <Badge className={`${KEY_TYPE_LABELS[keyType].color} text-white hover:${KEY_TYPE_LABELS[keyType].color}`}>

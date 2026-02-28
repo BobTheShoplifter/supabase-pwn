@@ -37,7 +37,7 @@ Key type is auto-detected from the prefix/JWT payload and displayed in the conne
 ## Getting Started
 
 ```bash
-git clone https://github.com/user/supabase-pwn.git
+git clone https://github.com/BobTheShoplifter/supabase-pwn.git
 cd supabase-pwn
 npm install
 npm run dev

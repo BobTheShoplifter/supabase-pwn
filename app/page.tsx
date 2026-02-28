@@ -99,8 +99,9 @@ export default function Home() {
                   </TabsContent>
                 </Tabs>
               ) : (
-                <div className="flex h-full items-center justify-center text-muted-foreground">
-                  Initialize a Supabase project to get started
+                <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
+                  <ShieldAlert className="h-8 w-8 opacity-30" />
+                  <p className="text-sm">Initialize a Supabase project to get started</p>
                 </div>
               )}
             </ResizablePanel>
@@ -109,8 +110,8 @@ export default function Home() {
               {initialized ? (
                 <AuthPanel />
               ) : (
-                <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-                  Auth panel
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+                  <p className="text-xs">Auth panel</p>
                 </div>
               )}
             </ResizablePanel>
