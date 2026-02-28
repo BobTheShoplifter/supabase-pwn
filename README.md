@@ -4,7 +4,7 @@ A web-based Supabase security testing toolkit for penetration testers. Point it 
 
 Inspired by [firepwn-tool](https://github.com/0xbigshaq/firepwn-tool) (Firebase security testing), built for the Supabase ecosystem.
 
-![Photo](image.png)
+![Photo](image-1.png)
 
 > **For authorized security testing only.** Always get explicit permission before testing projects you don't own.
 
