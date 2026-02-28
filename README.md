@@ -16,6 +16,7 @@ Inspired by [firepwn-tool](https://github.com/0xbigshaq/firepwn-tool) (Firebase 
 - **Table Bruteforcer** — When the OpenAPI schema is blocked (publishable keys), bruteforce ~130 common table names with custom wordlist support
 - **RPC Invoker** — Discover functions from the OpenAPI spec, see expected parameters, auto-populate args
 - **Storage Explorer** — List buckets, browse files, upload/download/delete, generate public & signed URLs
+  ![file explorer](image.png)
 - **Auth Probing** — Test sign-up, sign-in, anonymous auth, OAuth redirects, and inject bearer tokens
 - **Edge Functions** — Invoke edge functions with custom bodies and headers
 - **Realtime** — Subscribe to postgres changes, broadcast events, track presence
