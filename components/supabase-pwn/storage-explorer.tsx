@@ -9,6 +9,8 @@ import {
   Link,
   Copy,
   RefreshCw,
+  Search,
+  Loader2,
 } from "lucide-react"
 
 import { useSupabase } from "@/lib/supabase-context"
@@ -75,6 +77,25 @@ function formatDate(dateStr: string | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
+// Bucket bruteforce wordlist
+// ---------------------------------------------------------------------------
+
+const BUCKET_WORDLIST = [
+  "avatars", "images", "uploads", "files", "documents", "media", "photos",
+  "videos", "assets", "public", "private", "static", "content",
+  "profile-pictures", "profile-photos", "profile_pictures", "profile_photos",
+  "user-uploads", "user_uploads", "user-files", "user_files",
+  "attachments", "backup", "backups", "data", "exports", "imports",
+  "logos", "icons", "thumbnails", "covers", "banners",
+  "pdfs", "csv", "reports", "invoices", "receipts",
+  "audio", "music", "recordings", "voice",
+  "storage", "bucket", "cdn", "tmp", "temp", "cache",
+  "downloads", "shared", "resources", "templates",
+  "certificates", "contracts", "legal",
+  "screenshots", "snapshots", "previews",
+]
+
+// ---------------------------------------------------------------------------
 // StorageExplorer
 // ---------------------------------------------------------------------------
 
@@ -85,6 +106,8 @@ export function StorageExplorer() {
   const [buckets, setBuckets] = useState<BucketInfo[]>([])
   const [selectedBucket, setSelectedBucket] = useState<string>("")
   const [loadingBuckets, setLoadingBuckets] = useState(false)
+  const [bruteforcing, setBruteforcing] = useState(false)
+  const [manualBucket, setManualBucket] = useState("")
 
   // -- List files state -----------------------------------------------------
   const [listFolder, setListFolder] = useState("")
@@ -144,6 +167,87 @@ export function StorageExplorer() {
       setLoadingBuckets(false)
     }
   }, [client, addLog])
+
+  const handleBruteforceBuckets = useCallback(async () => {
+    if (!client) return
+    setBruteforcing(true)
+    try {
+      const extra = manualBucket
+        .split(/[\n,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const wordlist = extra.length > 0
+        ? [...new Set([...extra, ...BUCKET_WORDLIST])]
+        : BUCKET_WORDLIST
+      const existing = new Set(buckets.map((b) => b.name))
+
+      addLog("info", `Bruteforcing ${wordlist.length} bucket names...`)
+
+      const discovered: BucketInfo[] = []
+      const batchSize = 10
+
+      for (let i = 0; i < wordlist.length; i += batchSize) {
+        const batch = wordlist.slice(i, i + batchSize)
+        const results = await Promise.allSettled(
+          batch.map(async (name) => {
+            if (existing.has(name)) return null
+            const { error } = await client.storage.from(name).list("", { limit: 1 })
+            if (error) return null
+            return name
+          }),
+        )
+
+        for (const r of results) {
+          if (r.status === "fulfilled" && r.value) {
+            const name = r.value
+            discovered.push({
+              id: name,
+              name,
+              public: false, // unknown without admin access
+              created_at: "",
+              updated_at: "",
+            })
+            addLog("success", `Found bucket: ${name}`)
+          }
+        }
+      }
+
+      if (discovered.length > 0) {
+        setBuckets((prev) => {
+          const names = new Set(prev.map((b) => b.name))
+          return [...prev, ...discovered.filter((d) => !names.has(d.name))]
+        })
+      }
+
+      addLog(
+        "info",
+        `Bucket bruteforce complete. Found ${discovered.length} new bucket(s) out of ${wordlist.length} tried.`,
+      )
+    } catch (err) {
+      addLog(
+        "error",
+        err instanceof Error ? err.message : "Bucket bruteforce failed",
+        err,
+      )
+    } finally {
+      setBruteforcing(false)
+    }
+  }, [client, buckets, manualBucket, addLog])
+
+  const handleAddManualBucket = useCallback(() => {
+    const name = manualBucket.trim()
+    if (!name) return
+    setBuckets((prev) => {
+      if (prev.some((b) => b.name === name)) return prev
+      return [
+        ...prev,
+        { id: name, name, public: false, created_at: "", updated_at: "" },
+      ]
+    })
+    setSelectedBucket(name)
+    setManualBucket("")
+    addLog("info", `Added bucket "${name}" manually`)
+  }, [manualBucket, addLog])
 
   // -- File list ------------------------------------------------------------
 
@@ -389,8 +493,8 @@ export function StorageExplorer() {
       {/* Bucket Section                                                    */}
       {/* ----------------------------------------------------------------- */}
       <Card>
-        <CardContent className="pt-6 space-y-4">
-          <div className="flex items-center gap-2">
+        <CardContent className="pt-6 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button
               variant="outline"
               size="sm"
@@ -405,40 +509,76 @@ export function StorageExplorer() {
               List Buckets
             </Button>
 
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleBruteforceBuckets}
+              disabled={bruteforcing}
+            >
+              {bruteforcing ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Search className="size-3.5" />
+              )}
+              {bruteforcing ? "Bruteforcing..." : "Bruteforce Buckets"}
+            </Button>
+
             {buckets.length > 0 && (
-              <Select
-                value={selectedBucket}
-                onValueChange={setSelectedBucket}
-              >
-                <SelectTrigger className="w-56">
-                  <SelectValue placeholder="Select a bucket" />
-                </SelectTrigger>
-                <SelectContent>
-                  {buckets.map((b) => (
-                    <SelectItem key={b.id} value={b.name}>
-                      <span className="flex items-center gap-2">
-                        {b.name}
+              <Badge variant="secondary" className="text-xs">
+                {buckets.length} bucket(s)
+              </Badge>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Select
+              value={selectedBucket}
+              onValueChange={setSelectedBucket}
+            >
+              <SelectTrigger className="flex-1">
+                <SelectValue placeholder={buckets.length === 0 ? "No buckets — bruteforce or type name below" : "Select a bucket"} />
+              </SelectTrigger>
+              <SelectContent>
+                {buckets.map((b) => (
+                  <SelectItem key={b.id} value={b.name}>
+                    <span className="flex items-center gap-2">
+                      {b.name}
+                      {b.created_at && (
                         <Badge
                           variant={b.public ? "default" : "secondary"}
                           className="text-[10px] px-1.5 py-0"
                         >
                           {b.public ? "public" : "private"}
                         </Badge>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+                      )}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-            {selectedBucket && (
-              <Badge variant="outline" className="text-xs">
-                {selectedBucket}
-                {buckets.find((b) => b.name === selectedBucket)?.public
-                  ? " (public)"
-                  : " (private)"}
-              </Badge>
-            )}
+          <div className="flex items-center gap-2">
+            <Input
+              placeholder="Custom bucket names (comma separated) or type one to add"
+              value={manualBucket}
+              onChange={(e) => setManualBucket(e.target.value)}
+              className="text-xs flex-1"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  handleAddManualBucket()
+                }
+              }}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleAddManualBucket}
+              disabled={!manualBucket.trim()}
+            >
+              Add
+            </Button>
           </div>
         </CardContent>
       </Card>
