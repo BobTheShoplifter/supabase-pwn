@@ -867,7 +867,7 @@ function RpcTab() {
               <SelectValue placeholder="Select a function" />
             </SelectTrigger>
             <SelectContent>
-              {functions.map((fn) => (
+              {[...functions].sort((a, b) => a.name.localeCompare(b.name)).map((fn) => (
                 <SelectItem key={fn.name} value={fn.name}>
                   {fn.name}
                   {fn.params.length > 0 && (
@@ -1032,7 +1032,7 @@ export function DatabaseExplorer() {
             <SelectValue placeholder={tables.length === 0 ? "No tables — bruteforce to discover" : "Select a table or view"} />
           </SelectTrigger>
           <SelectContent>
-            {tables.map((t) => (
+            {[...tables].sort((a, b) => a.localeCompare(b)).map((t) => (
               <SelectItem key={t} value={t}>
                 {t}
               </SelectItem>
