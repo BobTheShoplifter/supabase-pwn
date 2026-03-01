@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
+
 
 // ---------------------------------------------------------------------------
 // Types
@@ -397,7 +397,7 @@ function SelectTab({
                 </Badge>
               </div>
             )}
-            <ScrollArea className="max-h-96">
+            <div className="max-h-[28rem] overflow-y-auto">
               {onSendToUpdate && rowCount && rowCount > 0 ? (
                 <div className="space-y-2">
                   {(() => {
@@ -426,7 +426,7 @@ function SelectTab({
               ) : (
                 <JsonResult json={result} />
               )}
-            </ScrollArea>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -529,9 +529,9 @@ function InsertTab({
       {result !== null && (
         <Card>
           <CardContent className="p-3">
-            <ScrollArea className="max-h-96">
+            <div className="max-h-[28rem] overflow-y-auto">
               <JsonResult json={result} />
-            </ScrollArea>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -697,9 +697,9 @@ function UpdateTab({
       {result !== null && (
         <Card>
           <CardContent className="p-3">
-            <ScrollArea className="max-h-96">
+            <div className="max-h-[28rem] overflow-y-auto">
               <JsonResult json={result} />
-            </ScrollArea>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -787,9 +787,9 @@ function DeleteTab({
       {result !== null && (
         <Card>
           <CardContent className="p-3">
-            <ScrollArea className="max-h-96">
+            <div className="max-h-[28rem] overflow-y-auto">
               <JsonResult json={result} />
-            </ScrollArea>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -944,9 +944,9 @@ function RpcTab() {
       {result !== null && (
         <Card>
           <CardContent className="p-3">
-            <ScrollArea className="max-h-96">
+            <div className="max-h-[28rem] overflow-y-auto">
               <JsonResult json={result} />
-            </ScrollArea>
+            </div>
           </CardContent>
         </Card>
       )}

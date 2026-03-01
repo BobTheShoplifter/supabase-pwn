@@ -254,6 +254,125 @@ function AnonymousTab() {
 }
 
 // ---------------------------------------------------------------------------
+// Magic Link Tab
+// ---------------------------------------------------------------------------
+
+function MagicLinkTab() {
+  const { client, addLog } = useSupabase()
+  const [email, setEmail] = useState("")
+  const [otpCode, setOtpCode] = useState("")
+  const [sent, setSent] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+
+  async function handleMagicLink() {
+    if (!client || !email) return
+    setLoading(true)
+    try {
+      const { data, error } = await client.auth.signInWithOtp({ email })
+      if (error) {
+        addLog("error", `Magic link / OTP failed: ${error.message}`, error)
+      } else {
+        addLog(
+          "success",
+          `OTP sent to ${email}`,
+          data,
+        )
+        setSent(true)
+      }
+    } catch (err) {
+      addLog(
+        "error",
+        err instanceof Error ? err.message : "Magic link threw an exception",
+        err,
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleVerifyOtp() {
+    if (!client || !email || !otpCode.trim()) return
+    setVerifying(true)
+    try {
+      const { data, error } = await client.auth.verifyOtp({
+        email,
+        token: otpCode.trim(),
+        type: "email",
+      })
+      if (error) {
+        addLog("error", `OTP verification failed: ${error.message}`, error)
+      } else {
+        addLog(
+          "success",
+          `OTP verified — user ID: ${data.user?.id ?? "unknown"}`,
+          data,
+        )
+      }
+    } catch (err) {
+      addLog(
+        "error",
+        err instanceof Error ? err.message : "OTP verification threw an exception",
+        err,
+      )
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Send a magic link / OTP code to an email. If the project sends a code
+        instead of a link, enter it below to verify.
+      </p>
+      <div className="space-y-2">
+        <Label htmlFor="magic-email">Email</Label>
+        <Input
+          id="magic-email"
+          type="email"
+          placeholder="user@example.com"
+          value={email}
+          onChange={(e) => { setEmail(e.target.value); setSent(false) }}
+          disabled={loading || verifying}
+        />
+      </div>
+      <Button
+        className="w-full"
+        onClick={handleMagicLink}
+        disabled={loading || !email}
+      >
+        {loading ? "Sending..." : sent ? "Resend OTP" : "Send Magic Link / OTP"}
+      </Button>
+
+      {sent && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="otp-code">OTP Code</Label>
+            <Input
+              id="otp-code"
+              type="text"
+              placeholder="123456"
+              value={otpCode}
+              onChange={(e) => setOtpCode(e.target.value)}
+              disabled={verifying}
+              className="font-mono tracking-widest text-center"
+            />
+          </div>
+          <Button
+            className="w-full"
+            onClick={handleVerifyOtp}
+            disabled={verifying || !otpCode.trim()}
+          >
+            {verifying ? "Verifying..." : "Verify OTP"}
+          </Button>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // OAuth Tab
 // ---------------------------------------------------------------------------
 
@@ -456,7 +575,7 @@ function AuthenticatedUserInfo() {
             <User className="h-4 w-4 text-muted-foreground" />
             <CardTitle className="text-sm">Authenticated User</CardTitle>
           </div>
-          <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">
+          <Badge className="bg-primary text-primary-foreground hover:bg-primary">
             {String(role)}
           </Badge>
         </div>
@@ -484,7 +603,7 @@ function AuthenticatedUserInfo() {
               <Copy className="h-3 w-3" />
             </Button>
             {copied && (
-              <span className="text-xs text-emerald-500">Copied!</span>
+              <span className="text-xs text-primary">Copied!</span>
             )}
           </div>
         </div>
@@ -584,6 +703,9 @@ export function AuthPanel() {
                 <TabsTrigger value="anon" className="text-xs">
                   Anonymous
                 </TabsTrigger>
+                <TabsTrigger value="magic" className="text-xs">
+                  Magic Link
+                </TabsTrigger>
                 <TabsTrigger value="oauth" className="text-xs">
                   OAuth
                 </TabsTrigger>
@@ -602,6 +724,10 @@ export function AuthPanel() {
 
               <TabsContent value="anon" className="mt-4">
                 <AnonymousTab />
+              </TabsContent>
+
+              <TabsContent value="magic" className="mt-4">
+                <MagicLinkTab />
               </TabsContent>
 
               <TabsContent value="oauth" className="mt-4">
