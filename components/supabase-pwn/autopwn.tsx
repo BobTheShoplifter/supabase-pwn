@@ -1141,272 +1141,272 @@ export function AutoPwn() {
         storageResults.length > 0 ||
         authResults.length > 0 ||
         functionResults.length > 0) && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Shield className="size-4" />
-              Detailed Results
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1">
-            {/* ----------------------------------------------------------- */}
-            {/* Recon Results                                                */}
-            {/* ----------------------------------------------------------- */}
-            <ResultSection
-              title="Reconnaissance"
-              icon={Database}
-              count={
-                (schema?.tables.length ?? 0) +
-                (schema?.views.length ?? 0) +
-                (schema?.functions.length ?? 0)
-              }
-            >
-              <div className="grid grid-cols-3 gap-4 pt-2 text-sm">
-                <div className="text-center">
-                  <div className="text-2xl font-bold">
-                    {schema?.tables.length ?? 0}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Shield className="size-4" />
+                Detailed Results
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1">
+              {/* ----------------------------------------------------------- */}
+              {/* Recon Results                                                */}
+              {/* ----------------------------------------------------------- */}
+              <ResultSection
+                title="Reconnaissance"
+                icon={Database}
+                count={
+                  (schema?.tables.length ?? 0) +
+                  (schema?.views.length ?? 0) +
+                  (schema?.functions.length ?? 0)
+                }
+              >
+                <div className="grid grid-cols-3 gap-4 pt-2 text-sm">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold">
+                      {schema?.tables.length ?? 0}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Tables</div>
                   </div>
-                  <div className="text-xs text-muted-foreground">Tables</div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold">
+                      {schema?.views.length ?? 0}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Views</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold">
+                      {schema?.functions.length ?? 0}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Functions</div>
+                  </div>
                 </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold">
-                    {schema?.views.length ?? 0}
-                  </div>
-                  <div className="text-xs text-muted-foreground">Views</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold">
-                    {schema?.functions.length ?? 0}
-                  </div>
-                  <div className="text-xs text-muted-foreground">Functions</div>
-                </div>
-              </div>
-            </ResultSection>
+              </ResultSection>
 
-            {/* ----------------------------------------------------------- */}
-            {/* Database RLS Results                                         */}
-            {/* ----------------------------------------------------------- */}
-            {dbResults.length > 0 && (
-              <>
-                <Separator />
-                <ResultSection
-                  title="Database RLS Testing"
-                  icon={Database}
-                  count={dbResults.length}
-                >
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm table-fixed">
-                      <thead>
-                        <tr className="border-b text-xs text-muted-foreground">
-                          <th className="py-2 pr-2 text-left font-medium w-[36%]">
-                            Table
-                          </th>
-                          <th className="py-2 px-1 text-center font-medium w-[16%]">
-                            SELECT
-                          </th>
-                          <th className="py-2 px-1 text-center font-medium w-[16%]">
-                            INSERT
-                          </th>
-                          <th className="py-2 px-1 text-center font-medium w-[16%]">
-                            UPDATE
-                          </th>
-                          <th className="py-2 px-1 text-center font-medium w-[16%]">
-                            DELETE
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dbResults.map((r) => (
-                          <tr
-                            key={r.name}
-                            className="border-b border-border/50"
-                          >
-                            <td className="py-2 pr-2 font-mono text-xs truncate" title={r.name}>
-                              {r.name}
-                            </td>
-                            <td className="py-2 px-2 text-center">
-                              <StatusBadge status={r.select} />
-                            </td>
-                            <td className="py-2 px-2 text-center">
-                              <StatusBadge status={r.insert} />
-                            </td>
-                            <td className="py-2 px-2 text-center">
-                              <StatusBadge status={r.update} />
-                            </td>
-                            <td className="py-2 px-2 text-center">
-                              <StatusBadge status={r.delete} />
-                            </td>
+              {/* ----------------------------------------------------------- */}
+              {/* Database RLS Results                                         */}
+              {/* ----------------------------------------------------------- */}
+              {dbResults.length > 0 && (
+                <>
+                  <Separator />
+                  <ResultSection
+                    title="Database RLS Testing"
+                    icon={Database}
+                    count={dbResults.length}
+                  >
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm table-fixed">
+                        <thead>
+                          <tr className="border-b text-xs text-muted-foreground">
+                            <th className="py-2 pr-2 text-left font-medium w-[36%]">
+                              Table
+                            </th>
+                            <th className="py-2 px-1 text-center font-medium w-[16%]">
+                              SELECT
+                            </th>
+                            <th className="py-2 px-1 text-center font-medium w-[16%]">
+                              INSERT
+                            </th>
+                            <th className="py-2 px-1 text-center font-medium w-[16%]">
+                              UPDATE
+                            </th>
+                            <th className="py-2 px-1 text-center font-medium w-[16%]">
+                              DELETE
+                            </th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </ResultSection>
-              </>
-            )}
+                        </thead>
+                        <tbody>
+                          {dbResults.map((r) => (
+                            <tr
+                              key={r.name}
+                              className="border-b border-border/50"
+                            >
+                              <td className="py-2 pr-2 font-mono text-xs truncate" title={r.name}>
+                                {r.name}
+                              </td>
+                              <td className="py-2 px-2 text-center">
+                                <StatusBadge status={r.select} />
+                              </td>
+                              <td className="py-2 px-2 text-center">
+                                <StatusBadge status={r.insert} />
+                              </td>
+                              <td className="py-2 px-2 text-center">
+                                <StatusBadge status={r.update} />
+                              </td>
+                              <td className="py-2 px-2 text-center">
+                                <StatusBadge status={r.delete} />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </ResultSection>
+                </>
+              )}
 
-            {/* ----------------------------------------------------------- */}
-            {/* Storage Results                                              */}
-            {/* ----------------------------------------------------------- */}
-            {storageResults.length > 0 && (
-              <>
-                <Separator />
-                <ResultSection
-                  title="Storage Scanning"
-                  icon={HardDrive}
-                  count={storageResults.length}
-                >
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm table-fixed">
-                      <thead>
-                        <tr className="border-b text-xs text-muted-foreground">
-                          <th className="py-2 pr-2 text-left font-medium w-[34%]">
-                            Bucket
-                          </th>
-                          <th className="py-2 px-1 text-center font-medium w-[22%]">
-                            Public
-                          </th>
-                          <th className="py-2 px-1 text-center font-medium w-[22%]">
-                            Listable
-                          </th>
-                          <th className="py-2 px-1 text-center font-medium w-[22%]">
-                            Files Found
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {storageResults.map((r) => (
-                          <tr
-                            key={r.name}
-                            className="border-b border-border/50"
-                          >
-                            <td className="py-2 pr-2 font-mono text-xs truncate" title={r.name}>
-                              {r.name}
-                            </td>
-                            <td className="py-2 px-2 text-center">
-                              <Badge
-                                className={
-                                  r.public
-                                    ? "bg-yellow-600/20 text-yellow-400 border-yellow-600/30 hover:bg-yellow-600/20"
-                                    : "bg-green-600/20 text-green-400 border-green-600/30 hover:bg-green-600/20"
-                                }
-                              >
-                                {r.public ? "YES" : "NO"}
-                              </Badge>
-                            </td>
-                            <td className="py-2 px-2 text-center">
-                              <StatusBadge status={r.listable} />
-                            </td>
-                            <td className="py-2 px-2 text-center text-xs text-muted-foreground">
-                              {r.fileCount !== undefined ? r.fileCount : "-"}
-                            </td>
+              {/* ----------------------------------------------------------- */}
+              {/* Storage Results                                              */}
+              {/* ----------------------------------------------------------- */}
+              {storageResults.length > 0 && (
+                <>
+                  <Separator />
+                  <ResultSection
+                    title="Storage Scanning"
+                    icon={HardDrive}
+                    count={storageResults.length}
+                  >
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm table-fixed">
+                        <thead>
+                          <tr className="border-b text-xs text-muted-foreground">
+                            <th className="py-2 pr-2 text-left font-medium w-[34%]">
+                              Bucket
+                            </th>
+                            <th className="py-2 px-1 text-center font-medium w-[22%]">
+                              Public
+                            </th>
+                            <th className="py-2 px-1 text-center font-medium w-[22%]">
+                              Listable
+                            </th>
+                            <th className="py-2 px-1 text-center font-medium w-[22%]">
+                              Files Found
+                            </th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </ResultSection>
-              </>
-            )}
+                        </thead>
+                        <tbody>
+                          {storageResults.map((r) => (
+                            <tr
+                              key={r.name}
+                              className="border-b border-border/50"
+                            >
+                              <td className="py-2 pr-2 font-mono text-xs truncate" title={r.name}>
+                                {r.name}
+                              </td>
+                              <td className="py-2 px-2 text-center">
+                                <Badge
+                                  className={
+                                    r.public
+                                      ? "bg-yellow-600/20 text-yellow-400 border-yellow-600/30 hover:bg-yellow-600/20"
+                                      : "bg-green-600/20 text-green-400 border-green-600/30 hover:bg-green-600/20"
+                                  }
+                                >
+                                  {r.public ? "YES" : "NO"}
+                                </Badge>
+                              </td>
+                              <td className="py-2 px-2 text-center">
+                                <StatusBadge status={r.listable} />
+                              </td>
+                              <td className="py-2 px-2 text-center text-xs text-muted-foreground">
+                                {r.fileCount !== undefined ? r.fileCount : "-"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </ResultSection>
+                </>
+              )}
 
-            {/* ----------------------------------------------------------- */}
-            {/* Auth Results                                                 */}
-            {/* ----------------------------------------------------------- */}
-            {authResults.length > 0 && (
-              <>
-                <Separator />
-                <ResultSection
-                  title="Auth Probing"
-                  icon={Key}
-                  count={authResults.length}
-                >
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm table-fixed">
-                      <thead>
-                        <tr className="border-b text-xs text-muted-foreground">
-                          <th className="py-2 pr-2 text-left font-medium w-[25%]">
-                            Feature
-                          </th>
-                          <th className="py-2 px-1 text-center font-medium w-[20%]">
-                            Status
-                          </th>
-                          <th className="py-2 px-2 text-left font-medium w-[55%]">
-                            Details
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {authResults.map((r) => (
-                          <tr
-                            key={r.feature}
-                            className="border-b border-border/50"
-                          >
-                            <td className="py-2 pr-2 text-xs font-medium truncate">
-                              {r.feature}
-                            </td>
-                            <td className="py-2 px-1 text-center">
-                              <StatusBadge status={r.status} />
-                            </td>
-                            <td className="py-2 px-2 text-xs text-muted-foreground">
-                              <div className="truncate" title={r.details ?? "-"}>
-                                {r.details ?? "-"}
-                              </div>
-                            </td>
+              {/* ----------------------------------------------------------- */}
+              {/* Auth Results                                                 */}
+              {/* ----------------------------------------------------------- */}
+              {authResults.length > 0 && (
+                <>
+                  <Separator />
+                  <ResultSection
+                    title="Auth Probing"
+                    icon={Key}
+                    count={authResults.length}
+                  >
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm table-fixed">
+                        <thead>
+                          <tr className="border-b text-xs text-muted-foreground">
+                            <th className="py-2 pr-2 text-left font-medium w-[25%]">
+                              Feature
+                            </th>
+                            <th className="py-2 px-1 text-center font-medium w-[20%]">
+                              Status
+                            </th>
+                            <th className="py-2 px-2 text-left font-medium w-[55%]">
+                              Details
+                            </th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </ResultSection>
-              </>
-            )}
+                        </thead>
+                        <tbody>
+                          {authResults.map((r) => (
+                            <tr
+                              key={r.feature}
+                              className="border-b border-border/50"
+                            >
+                              <td className="py-2 pr-2 text-xs font-medium truncate">
+                                {r.feature}
+                              </td>
+                              <td className="py-2 px-1 text-center">
+                                <StatusBadge status={r.status} />
+                              </td>
+                              <td className="py-2 px-2 text-xs text-muted-foreground">
+                                <div className="truncate" title={r.details ?? "-"}>
+                                  {r.details ?? "-"}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </ResultSection>
+                </>
+              )}
 
-            {/* ----------------------------------------------------------- */}
-            {/* Edge Function Results                                        */}
-            {/* ----------------------------------------------------------- */}
-            {functionResults.length > 0 && (
-              <>
-                <Separator />
-                <ResultSection
-                  title="Edge Function Discovery"
-                  icon={Zap}
-                  count={functionResults.filter((r) => r.status === "found").length}
-                >
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm table-fixed">
-                      <thead>
-                        <tr className="border-b text-xs text-muted-foreground">
-                          <th className="py-2 pr-2 text-left font-medium w-[60%]">
-                            Name
-                          </th>
-                          <th className="py-2 px-1 text-center font-medium w-[40%]">
-                            Status
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {functionResults.map((r) => (
-                          <tr
-                            key={r.name}
-                            className="border-b border-border/50"
-                          >
-                            <td className="py-2 pr-2 font-mono text-xs truncate" title={r.name}>
-                              {r.name}
-                            </td>
-                            <td className="py-2 px-2 text-center">
-                              <StatusBadge status={r.status} />
-                            </td>
+              {/* ----------------------------------------------------------- */}
+              {/* Edge Function Results                                        */}
+              {/* ----------------------------------------------------------- */}
+              {functionResults.length > 0 && (
+                <>
+                  <Separator />
+                  <ResultSection
+                    title="Edge Function Discovery"
+                    icon={Zap}
+                    count={functionResults.filter((r) => r.status === "found").length}
+                  >
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm table-fixed">
+                        <thead>
+                          <tr className="border-b text-xs text-muted-foreground">
+                            <th className="py-2 pr-2 text-left font-medium w-[60%]">
+                              Name
+                            </th>
+                            <th className="py-2 px-1 text-center font-medium w-[40%]">
+                              Status
+                            </th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </ResultSection>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      )}
+                        </thead>
+                        <tbody>
+                          {functionResults.map((r) => (
+                            <tr
+                              key={r.name}
+                              className="border-b border-border/50"
+                            >
+                              <td className="py-2 pr-2 font-mono text-xs truncate" title={r.name}>
+                                {r.name}
+                              </td>
+                              <td className="py-2 px-2 text-center">
+                                <StatusBadge status={r.status} />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </ResultSection>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
     </div>
   )
 }
