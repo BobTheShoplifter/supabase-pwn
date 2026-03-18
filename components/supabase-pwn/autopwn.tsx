@@ -35,7 +35,7 @@ import { Separator } from "@/components/ui/separator"
 // Types
 // ---------------------------------------------------------------------------
 
-type AccessStatus = "allowed" | "denied" | "error"
+type AccessStatus = "allowed" | "denied" | "error" | "empty"
 type WriteStatus = AccessStatus | "skipped"
 
 type ScanResult = {
@@ -125,7 +125,13 @@ function StatusBadge({
     case "found":
       return (
         <Badge className="bg-green-600/20 text-green-400 border-green-600/30 hover:bg-green-600/20">
-          {status.toUpperCase()}
+          {status === "allowed" ? "DATA EXPOSED" : status.toUpperCase()}
+        </Badge>
+      )
+    case "empty":
+      return (
+        <Badge className="bg-yellow-600/20 text-yellow-400 border-yellow-600/30 hover:bg-yellow-600/20">
+          200 OK (EMPTY)
         </Badge>
       )
     case "denied":
@@ -138,7 +144,7 @@ function StatusBadge({
       )
     case "error":
       return (
-        <Badge className="bg-yellow-600/20 text-yellow-400 border-yellow-600/30 hover:bg-yellow-600/20">
+        <Badge className="bg-orange-600/20 text-orange-400 border-orange-600/30 hover:bg-orange-600/20">
           ERROR
         </Badge>
       )
@@ -345,9 +351,14 @@ export function AutoPwn() {
             }
             result.details = `SELECT: ${error.message}`
           } else {
-            result.select = "allowed"
             const rowCount = Array.isArray(data) ? data.length : 0
-            result.details = `SELECT returned ${rowCount} row(s)`
+            if (rowCount > 0) {
+              result.select = "allowed"
+              result.details = `SELECT returned ${rowCount} row(s) — DATA EXPOSED`
+            } else {
+              result.select = "empty"
+              result.details = `SELECT returned 200 OK but 0 rows (empty table or RLS filtering)`
+            }
           }
         } catch (err) {
           result.select = "error"
@@ -443,10 +454,11 @@ export function AutoPwn() {
 
     setDbResults(results)
 
-    const allowedCount = results.filter((r) => r.select === "allowed").length
+    const dataExposedCount = results.filter((r) => r.select === "allowed").length
+    const emptyOkCount = results.filter((r) => r.select === "empty").length
     addLog(
-      allowedCount > 0 ? "warning" : "success",
-      `Database RLS: ${allowedCount}/${results.length} tables allow SELECT without RLS`,
+      dataExposedCount > 0 ? "warning" : "success",
+      `Database RLS: ${dataExposedCount}/${results.length} tables expose data, ${emptyOkCount} return 200 OK (empty)`,
     )
 
     setProgress(calculateProgress("database", 100))
@@ -819,6 +831,7 @@ export function AutoPwn() {
 
   const summary = {
     tablesReadable: dbResults.filter((r) => r.select === "allowed").length,
+    tablesEmpty: dbResults.filter((r) => r.select === "empty").length,
     totalTables: dbResults.length,
     tablesWritable: dbResults.filter((r) => r.insert === "allowed").length,
     bucketsFound: storageResults.length,
@@ -1060,8 +1073,13 @@ export function AutoPwn() {
                         : "bg-green-600/20 text-green-400 border-green-600/30 hover:bg-green-600/20"
                     }
                   >
-                    {summary.tablesReadable}/{summary.totalTables} tables readable
+                    {summary.tablesReadable}/{summary.totalTables} tables expose data
                   </Badge>
+                  {summary.tablesEmpty > 0 && (
+                    <Badge className="bg-yellow-600/20 text-yellow-400 border-yellow-600/30 hover:bg-yellow-600/20">
+                      {summary.tablesEmpty} return 200 OK (empty)
+                    </Badge>
+                  )}
                   {config.writeTesting && (
                     <Badge
                       className={

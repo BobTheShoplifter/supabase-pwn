@@ -1,10 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { Plus, X, Play, Trash2, Wand2, Pencil, Search, Loader2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Plus, X, Play, Trash2, Wand2, Pencil, Search, Loader2, Upload, FileUp, Shield } from "lucide-react"
 import { Highlight, themes } from "prism-react-renderer"
 
-import { useSupabase } from "@/lib/supabase-context"
+import { useSupabase, type RlsPolicy } from "@/lib/supabase-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -955,11 +955,131 @@ function RpcTab() {
 }
 
 // ---------------------------------------------------------------------------
+// RLS Policies Tab
+// ---------------------------------------------------------------------------
+
+const COMMAND_COLORS: Record<string, string> = {
+  SELECT: "bg-blue-600",
+  INSERT: "bg-green-600",
+  UPDATE: "bg-amber-600",
+  DELETE: "bg-red-600",
+  ALL: "bg-purple-600",
+}
+
+function RlsPoliciesTab({
+  policies,
+  selectedTable,
+}: {
+  policies: RlsPolicy[]
+  selectedTable: string
+}) {
+  const [filterTable, setFilterTable] = useState<"all" | "selected">("all")
+
+  const displayed = useMemo(() => {
+    if (filterTable === "selected" && selectedTable) {
+      return policies.filter((p) => p.table === selectedTable)
+    }
+    return policies
+  }, [policies, filterTable, selectedTable])
+
+  const tableNames = useMemo(
+    () => [...new Set(policies.map((p) => p.table))].sort(),
+    [policies],
+  )
+
+  if (policies.length === 0) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          No RLS policies loaded. Import a schema dump to view policies.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <Label>RLS Policies</Label>
+          <p className="text-xs text-muted-foreground">
+            {policies.length} polic{policies.length === 1 ? "y" : "ies"} across {tableNames.length} table{tableNames.length !== 1 ? "s" : ""}
+          </p>
+        </div>
+        {selectedTable && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant={filterTable === "all" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setFilterTable("all")}
+            >
+              All
+            </Button>
+            <Button
+              variant={filterTable === "selected" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setFilterTable("selected")}
+            >
+              {selectedTable}
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <div className="max-h-[28rem] overflow-y-auto space-y-2">
+        {displayed.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4 text-center">
+            No policies for the selected table.
+          </p>
+        ) : (
+          displayed.map((policy, idx) => (
+            <Card key={`${policy.table}-${policy.name}-${idx}`}>
+              <CardContent className="p-3 space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant="outline" className="font-mono text-xs">
+                    {policy.table}
+                  </Badge>
+                  <Badge className={`text-xs text-white ${COMMAND_COLORS[policy.command] ?? "bg-slate-600"}`}>
+                    {policy.command}
+                  </Badge>
+                  <span className="text-sm font-medium">{policy.name}</span>
+                </div>
+                {policy.using && (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">USING</Label>
+                    <pre className="text-xs bg-muted p-2 rounded font-mono overflow-x-auto whitespace-pre-wrap">
+                      {policy.using}
+                    </pre>
+                  </div>
+                )}
+                {policy.withCheck && (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">WITH CHECK</Label>
+                    <pre className="text-xs bg-muted p-2 rounded font-mono overflow-x-auto whitespace-pre-wrap">
+                      {policy.withCheck}
+                    </pre>
+                  </div>
+                )}
+                {!policy.using && !policy.withCheck && (
+                  <p className="text-xs text-yellow-400">
+                    No USING or WITH CHECK clause — may allow unrestricted access
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main DatabaseExplorer Component
 // ---------------------------------------------------------------------------
 
 export function DatabaseExplorer() {
-  const { client, schema, discoverTables } = useSupabase()
+  const { client, schema, discoverTables, importSchemaDump, addLog } = useSupabase()
 
   const [selectedTable, setSelectedTable] = useState("")
   const [discovering, setDiscovering] = useState(false)
@@ -970,8 +1090,13 @@ export function DatabaseExplorer() {
     idColumn: string
     idValue: unknown
   } | null>(null)
+  const [schemaDumpText, setSchemaDumpText] = useState("")
+  const [showSchemaImport, setShowSchemaImport] = useState(false)
+  const [addTableName, setAddTableName] = useState("")
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const tables = schema?.tables ?? []
+  const rlsPolicies = schema?.rlsPolicies ?? []
 
   const selectedColumns = useMemo(() => {
     if (!schema || !selectedTable) return []
@@ -1045,8 +1170,129 @@ export function DatabaseExplorer() {
           onChange={(e) => setCustomWordlist(e.target.value)}
           className="text-xs"
         />
-        {tables.length > 0 && (
-          <p className="text-xs text-muted-foreground">{tables.length} table(s) discovered</p>
+
+        {/* Manual table add (no bruteforce) */}
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Add table by name (no bruteforce)"
+            value={addTableName}
+            onChange={(e) => setAddTableName(e.target.value)}
+            className="text-xs flex-1"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && addTableName.trim()) {
+                const names = addTableName
+                  .split(/[,\n]+/)
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+                if (names.length > 0) {
+                  importSchemaDump(
+                    names.map((n) => `CREATE TABLE IF NOT EXISTS "public"."${n}" ();`).join("\n")
+                  )
+                  setAddTableName("")
+                }
+              }
+            }}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!addTableName.trim()}
+            onClick={() => {
+              const names = addTableName
+                .split(/[,\n]+/)
+                .map((s) => s.trim())
+                .filter(Boolean)
+              if (names.length > 0) {
+                importSchemaDump(
+                  names.map((n) => `CREATE TABLE IF NOT EXISTS "public"."${n}" ();`).join("\n")
+                )
+                setAddTableName("")
+              }
+            }}
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            Add
+          </Button>
+        </div>
+
+        {/* Schema import toggle */}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowSchemaImport((v) => !v)}
+          >
+            <FileUp className="h-3.5 w-3.5 mr-1" />
+            {showSchemaImport ? "Hide Schema Import" : "Import Schema Dump"}
+          </Button>
+          {tables.length > 0 && (
+            <p className="text-xs text-muted-foreground">{tables.length} table(s) discovered</p>
+          )}
+          {rlsPolicies.length > 0 && (
+            <p className="text-xs text-muted-foreground">{rlsPolicies.length} RLS polic{rlsPolicies.length === 1 ? "y" : "ies"}</p>
+          )}
+        </div>
+
+        {/* Schema dump upload area */}
+        {showSchemaImport && (
+          <Card>
+            <CardContent className="p-3 space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Paste a <code>pg_dump --schema-only</code> SQL dump or upload a <code>.sql</code> file to import tables, columns, functions, and RLS policies without bruteforcing.
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".sql,.txt"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    const reader = new FileReader()
+                    reader.onload = () => {
+                      const content = reader.result
+                      if (typeof content === "string") {
+                        importSchemaDump(content)
+                        addLog("info", `Imported schema from file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`)
+                        setShowSchemaImport(false)
+                      }
+                    }
+                    reader.readAsText(file)
+                    // Reset so the same file can be re-selected
+                    e.target.value = ""
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="h-3.5 w-3.5 mr-1" />
+                  Upload .sql file
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!schemaDumpText.trim()}
+                  onClick={() => {
+                    importSchemaDump(schemaDumpText)
+                    setSchemaDumpText("")
+                    setShowSchemaImport(false)
+                  }}
+                >
+                  <Play className="h-3.5 w-3.5 mr-1" />
+                  Import Pasted SQL
+                </Button>
+              </div>
+              <Textarea
+                placeholder="Paste SQL schema dump here..."
+                value={schemaDumpText}
+                onChange={(e) => setSchemaDumpText(e.target.value)}
+                className="min-h-32 font-mono text-xs"
+              />
+            </CardContent>
+          </Card>
         )}
       </div>
 
@@ -1073,6 +1319,15 @@ export function DatabaseExplorer() {
           <TabsTrigger value="update" disabled={!selectedTable}>Update</TabsTrigger>
           <TabsTrigger value="delete" disabled={!selectedTable}>Delete</TabsTrigger>
           <TabsTrigger value="rpc">RPC</TabsTrigger>
+          <TabsTrigger value="rls">
+            <Shield className="h-3.5 w-3.5 mr-1" />
+            RLS
+            {rlsPolicies.length > 0 && (
+              <Badge variant="secondary" className="ml-1.5 text-xs px-1.5 py-0">
+                {rlsPolicies.length}
+              </Badge>
+            )}
+          </TabsTrigger>
         </TabsList>
 
         {selectedTable ? (
@@ -1121,6 +1376,17 @@ export function DatabaseExplorer() {
           <Card>
             <CardContent className="p-4">
               <RpcTab />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="rls">
+          <Card>
+            <CardContent className="p-4">
+              <RlsPoliciesTab
+                policies={rlsPolicies}
+                selectedTable={selectedTable}
+              />
             </CardContent>
           </Card>
         </TabsContent>

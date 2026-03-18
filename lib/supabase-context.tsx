@@ -40,11 +40,20 @@ export type RpcFunction = {
   params: RpcParam[]
 }
 
+export type RlsPolicy = {
+  name: string
+  table: string
+  command: string // SELECT, INSERT, UPDATE, DELETE, ALL
+  using?: string
+  withCheck?: string
+}
+
 export type SchemaInfo = {
   tables: string[]
   views: string[]
   functions: RpcFunction[]
   columns: Record<string, { name: string; type: string; required: boolean }[]>
+  rlsPolicies: RlsPolicy[]
 }
 
 export type ApiKeyType = "publishable" | "secret" | "anon" | "service_role" | "unknown"
@@ -81,20 +90,29 @@ export type SupabaseState = {
 
 type Action =
   | {
-      type: "INITIALIZE"
-      payload: {
-        client: SupabaseClient
-        projectUrl: string
-        apiKey: string
-        keyType: ApiKeyType
-        schema: SchemaInfo
-      }
+    type: "INITIALIZE"
+    payload: {
+      client: SupabaseClient
+      projectUrl: string
+      apiKey: string
+      keyType: ApiKeyType
+      schema: SchemaInfo
     }
+  }
   | { type: "SET_AUTH"; payload: { user: User | null; session: Session | null } }
   | { type: "ADD_LOG"; payload: LogEntry }
   | { type: "CLEAR_LOGS" }
   | { type: "DISCONNECT" }
   | { type: "MERGE_SCHEMA"; payload: { tables: string[]; columns: SchemaInfo["columns"] } }
+  | {
+    type: "IMPORT_SCHEMA"
+    payload: {
+      tables: string[]
+      columns: SchemaInfo["columns"]
+      functions: RpcFunction[]
+      rlsPolicies: RlsPolicy[]
+    }
+  }
 
 // ---------------------------------------------------------------------------
 // Context value shape
@@ -111,6 +129,7 @@ type SupabaseContextValue = SupabaseState & {
   signOut: () => Promise<void>
   disconnect: () => void
   discoverTables: (customNames?: string[]) => Promise<void>
+  importSchemaDump: (sql: string) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +191,26 @@ function reducer(state: SupabaseState, action: Action): SupabaseState {
           views: state.schema?.views ?? [],
           functions: state.schema?.functions ?? [],
           columns: { ...(state.schema?.columns ?? {}), ...action.payload.columns },
+          rlsPolicies: state.schema?.rlsPolicies ?? [],
+        },
+      }
+    }
+    case "IMPORT_SCHEMA": {
+      const existingTables = new Set(state.schema?.tables ?? [])
+      const importedTables = action.payload.tables.filter((t) => !existingTables.has(t))
+      const existingFnNames = new Set((state.schema?.functions ?? []).map((f) => f.name))
+      const importedFns = action.payload.functions.filter((f) => !existingFnNames.has(f.name))
+      return {
+        ...state,
+        schema: {
+          tables: [...(state.schema?.tables ?? []), ...importedTables],
+          views: state.schema?.views ?? [],
+          functions: [...(state.schema?.functions ?? []), ...importedFns],
+          columns: { ...(state.schema?.columns ?? {}), ...action.payload.columns },
+          rlsPolicies: [
+            ...(state.schema?.rlsPolicies ?? []),
+            ...action.payload.rlsPolicies,
+          ],
         },
       }
     }
@@ -262,7 +301,138 @@ function parseOpenAPISpec(spec: OpenAPISpec): SchemaInfo {
   // Treat all non-rpc paths as "tables" for now; views is left empty.
   const views: string[] = []
 
-  return { tables, views, functions, columns }
+  return { tables, views, functions, columns, rlsPolicies: [] }
+}
+
+// ---------------------------------------------------------------------------
+// SQL schema dump parser
+// ---------------------------------------------------------------------------
+
+export function parseSchemaDump(sql: string): {
+  tables: string[]
+  columns: SchemaInfo["columns"]
+  functions: RpcFunction[]
+  rlsPolicies: RlsPolicy[]
+} {
+  const tables: string[] = []
+  const columns: SchemaInfo["columns"] = {}
+  const functions: RpcFunction[] = []
+  const rlsPolicies: RlsPolicy[] = []
+  const seenTables = new Set<string>()
+  const seenFunctions = new Set<string>()
+
+  // ---- Parse CREATE TABLE statements ------------------------------------
+  const tableRegex =
+    /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"public"\.)?"([^"]+)"\s*\(([\s\S]*?)\);/gi
+  let match: RegExpExecArray | null
+  while ((match = tableRegex.exec(sql)) !== null) {
+    const tableName = match[1]
+    const body = match[2]
+    if (seenTables.has(tableName)) continue
+    seenTables.add(tableName)
+    tables.push(tableName)
+
+    // Parse column definitions from the table body
+    const cols: { name: string; type: string; required: boolean }[] = []
+    const lines = body.split("\n")
+    for (const line of lines) {
+      const trimmed = line.trim()
+      // Skip constraints, indexes, checks
+      if (
+        /^(CONSTRAINT|PRIMARY|UNIQUE|CHECK|FOREIGN|EXCLUDE)\b/i.test(trimmed) ||
+        !trimmed ||
+        trimmed === "(" ||
+        trimmed === ")"
+      )
+        continue
+
+      // Match:  "column_name" type_name ...
+      const colMatch = trimmed.match(
+        /^"([^"]+)"\s+("?[a-z_][a-z0-9_() ,]*"?)/i
+      )
+      if (colMatch) {
+        const colName = colMatch[1]
+        let colType = colMatch[2].replace(/^"|"$/g, "").toLowerCase()
+        // Simplify common type aliases
+        if (colType.startsWith("character varying")) colType = "varchar"
+        if (colType.startsWith("timestamp")) colType = "timestamptz"
+        if (colType === "bigint") colType = "int8"
+        const isRequired =
+          /\bNOT\s+NULL\b/i.test(trimmed) && !/\bDEFAULT\b/i.test(trimmed)
+        cols.push({ name: colName, type: colType, required: isRequired })
+      }
+    }
+    if (cols.length > 0) columns[tableName] = cols
+  }
+
+  // ---- Parse CREATE FUNCTION / CREATE OR REPLACE FUNCTION ---------------
+  const fnRegex =
+    /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:"public"\.)?"([^"]+)"\s*\(([\s\S]*?)\)\s+RETURNS\s+/gi
+  while ((match = fnRegex.exec(sql)) !== null) {
+    const fnName = match[1]
+    const paramStr = match[2].trim()
+    if (seenFunctions.has(fnName)) continue
+    seenFunctions.add(fnName)
+
+    const params: RpcParam[] = []
+    if (paramStr) {
+      // Split by top-level commas (respecting parentheses depth)
+      const paramParts: string[] = []
+      let depth = 0
+      let current = ""
+      for (const ch of paramStr) {
+        if (ch === "(") depth++
+        else if (ch === ")") depth--
+        else if (ch === "," && depth === 0) {
+          paramParts.push(current.trim())
+          current = ""
+          continue
+        }
+        current += ch
+      }
+      if (current.trim()) paramParts.push(current.trim())
+
+      for (const part of paramParts) {
+        // Format: "param_name" type  or  param_name type
+        const paramMatch = part.match(
+          /^"?([^"]+)"?\s+("?[a-z_][a-z0-9_[\]() ,]*"?)/i
+        )
+        if (paramMatch) {
+          params.push({
+            name: paramMatch[1],
+            type: paramMatch[2].replace(/^"|"$/g, "").toLowerCase(),
+            required: !/\bDEFAULT\b/i.test(part),
+          })
+        }
+      }
+    }
+    functions.push({ name: fnName, params })
+  }
+
+  // ---- Parse CREATE POLICY statements -----------------------------------
+  const policyRegex =
+    /CREATE\s+POLICY\s+"([^"]+)"\s+ON\s+(?:"public"\.)?"([^"]+)"\s*([\s\S]*?)(?=;\s*(?:CREATE|ALTER|GRANT|REVOKE|$))/gi
+  while ((match = policyRegex.exec(sql)) !== null) {
+    const policyName = match[1]
+    const tableName = match[2]
+    const body = match[3]
+
+    let command = "ALL"
+    const cmdMatch = body.match(/\bFOR\s+(SELECT|INSERT|UPDATE|DELETE|ALL)\b/i)
+    if (cmdMatch) command = cmdMatch[1].toUpperCase()
+
+    let using: string | undefined
+    const usingMatch = body.match(/\bUSING\s*\((.+)\)/i)
+    if (usingMatch) using = usingMatch[1].trim()
+
+    let withCheck: string | undefined
+    const checkMatch = body.match(/\bWITH\s+CHECK\s*\((.+)\)/i)
+    if (checkMatch) withCheck = checkMatch[1].trim()
+
+    rlsPolicies.push({ name: policyName, table: tableName, command, using, withCheck })
+  }
+
+  return { tables, columns, functions, rlsPolicies }
 }
 
 // ---------------------------------------------------------------------------
@@ -395,7 +565,7 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
         const client = createClient(projectUrl, apiKey)
 
         // Fetch OpenAPI spec for schema discovery (may fail with publishable keys)
-        let schema: SchemaInfo = { tables: [], views: [], functions: [], columns: {} }
+        let schema: SchemaInfo = { tables: [], views: [], functions: [], columns: {}, rlsPolicies: [] }
         let schemaBlocked = false
 
         try {
@@ -583,6 +753,34 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
     [state.projectUrl, state.apiKey, state.session, state.schema?.tables, addLog],
   )
 
+  // -- importSchemaDump ---------------------------------------------------
+  const importSchemaDump = useCallback(
+    (sql: string) => {
+      const parsed = parseSchemaDump(sql)
+
+      dispatch({
+        type: "IMPORT_SCHEMA",
+        payload: {
+          tables: parsed.tables,
+          columns: parsed.columns,
+          functions: parsed.functions,
+          rlsPolicies: parsed.rlsPolicies,
+        },
+      })
+
+      addLog(
+        "success",
+        `Schema import: ${parsed.tables.length} tables, ${parsed.functions.length} functions, ${parsed.rlsPolicies.length} RLS policies imported.`,
+        {
+          tables: parsed.tables,
+          functions: parsed.functions.map((f) => f.name),
+          rlsPolicies: parsed.rlsPolicies.map((p) => `${p.table}.${p.name} (${p.command})`),
+        },
+      )
+    },
+    [addLog],
+  )
+
   // -- memoised context value --------------------------------------------
   const value = useMemo<SupabaseContextValue>(
     () => ({
@@ -593,8 +791,9 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
       signOut,
       disconnect,
       discoverTables,
+      importSchemaDump,
     }),
-    [state, initialize, addLog, clearLogs, signOut, disconnect, discoverTables],
+    [state, initialize, addLog, clearLogs, signOut, disconnect, discoverTables, importSchemaDump],
   )
 
   return (
