@@ -685,6 +685,15 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // -- discoverTables (bruteforce) ----------------------------------------
+
+  /** Extract table name from PGRST205 hint like "Perhaps you meant the table 'public.departments'" */
+  const parseHintedTable = useCallback((hint: string | null | undefined): string | null => {
+    if (!hint) return null
+    // Match patterns: 'public.tablename' or 'tablename'
+    const m = hint.match(/perhaps you meant.*?'(?:public\.)?([^']+)'/i)
+    return m ? m[1] : null
+  }, [])
+
   const discoverTables = useCallback(
     async (customNames?: string[]) => {
       if (!state.projectUrl || !state.apiKey) return
@@ -698,45 +707,82 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
       const discovered: string[] = []
       const columns: SchemaInfo["columns"] = {}
       const existing = new Set(state.schema?.tables ?? [])
+      const hintedNames = new Set<string>() // tables revealed by PGRST205 hints
       const batchSize = 10
 
+      const probeTable = async (table: string) => {
+        if (existing.has(table) || discovered.includes(table)) return null
+        const res = await fetch(
+          `${state.projectUrl}/rest/v1/${table}?select=*&limit=1`,
+          {
+            headers: {
+              apikey: state.apiKey,
+              Authorization: `Bearer ${state.session?.access_token ?? state.apiKey}`,
+            },
+          },
+        )
+        if (res.ok) {
+          const data = await res.json()
+          return { table, data, hint: null }
+        }
+        // Parse error body for PGRST205 hints
+        try {
+          const body = await res.json()
+          if (body?.code === "PGRST205" && body?.hint) {
+            const hinted = parseHintedTable(body.hint)
+            return { table, data: null, hint: hinted }
+          }
+        } catch { /* ignore parse errors */ }
+        return null
+      }
+
+      const processResult = (r: { table: string; data: unknown; hint: string | null }) => {
+        if (r.data !== null) {
+          // Table exists
+          discovered.push(r.table)
+          existing.add(r.table)
+          if (Array.isArray(r.data) && r.data.length > 0) {
+            columns[r.table] = Object.keys(r.data[0]).map((name) => ({
+              name,
+              type: inferColumnType(r.data[0][name]),
+              required: false,
+            }))
+            addLog(
+              "success",
+              `Found: ${r.table} (${r.data.length} row visible, ${Object.keys(r.data[0]).length} cols)`,
+            )
+          } else {
+            addLog("success", `Found: ${r.table} (empty or RLS blocked)`)
+          }
+        } else if (r.hint) {
+          // PGRST205 hint revealed a different table name
+          if (!existing.has(r.hint) && !discovered.includes(r.hint) && !hintedNames.has(r.hint)) {
+            hintedNames.add(r.hint)
+            addLog("info", `Hint from "${r.table}": server suggested "${r.hint}"`)
+          }
+        }
+      }
+
+      // Main wordlist pass
       for (let i = 0; i < wordlist.length; i += batchSize) {
         const batch = wordlist.slice(i, i + batchSize)
-        const results = await Promise.allSettled(
-          batch.map(async (table) => {
-            if (existing.has(table)) return null
-            const res = await fetch(
-              `${state.projectUrl}/rest/v1/${table}?select=*&limit=1`,
-              {
-                headers: {
-                  apikey: state.apiKey,
-                  Authorization: `Bearer ${state.session?.access_token ?? state.apiKey}`,
-                },
-              },
-            )
-            if (!res.ok) return null
-            const data = await res.json()
-            return { table, data }
-          }),
-        )
-
+        const results = await Promise.allSettled(batch.map(probeTable))
         for (const r of results) {
-          if (r.status === "fulfilled" && r.value) {
-            const { table, data } = r.value
-            discovered.push(table)
-            if (Array.isArray(data) && data.length > 0) {
-              columns[table] = Object.keys(data[0]).map((name) => ({
-                name,
-                type: inferColumnType(data[0][name]),
-                required: false,
-              }))
-              addLog(
-                "success",
-                `Found: ${table} (${data.length} row visible, ${Object.keys(data[0]).length} cols)`,
-              )
-            } else {
-              addLog("success", `Found: ${table} (empty or RLS blocked)`)
-            }
+          if (r.status === "fulfilled" && r.value) processResult(r.value)
+        }
+      }
+
+      // Second pass: probe tables revealed by PGRST205 hints
+      const hintsToProbe = [...hintedNames].filter(
+        (t) => !existing.has(t) && !discovered.includes(t),
+      )
+      if (hintsToProbe.length > 0) {
+        addLog("info", `Probing ${hintsToProbe.length} table(s) discovered from PGRST205 hints...`)
+        for (let i = 0; i < hintsToProbe.length; i += batchSize) {
+          const batch = hintsToProbe.slice(i, i + batchSize)
+          const results = await Promise.allSettled(batch.map(probeTable))
+          for (const r of results) {
+            if (r.status === "fulfilled" && r.value) processResult(r.value)
           }
         }
       }
@@ -745,12 +791,14 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "MERGE_SCHEMA", payload: { tables: discovered, columns } })
       }
 
+      const hintCount = hintsToProbe.length
       addLog(
         "info",
-        `Bruteforce complete. Found ${discovered.length} new table(s) out of ${wordlist.length} tried.`,
+        `Bruteforce complete. Found ${discovered.length} new table(s) out of ${wordlist.length} tried.` +
+          (hintCount > 0 ? ` ${hintCount} additional table(s) found via PGRST205 hints.` : ""),
       )
     },
-    [state.projectUrl, state.apiKey, state.session, state.schema?.tables, addLog],
+    [state.projectUrl, state.apiKey, state.session, state.schema?.tables, addLog, parseHintedTable],
   )
 
   // -- importSchemaDump ---------------------------------------------------
