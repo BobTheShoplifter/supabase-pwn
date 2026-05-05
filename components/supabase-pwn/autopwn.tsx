@@ -562,7 +562,7 @@ export function AutoPwn() {
     // Test signup
     setCurrentItem("Testing open signup...")
     try {
-      const probeEmail = `supabase-pwn-${crypto.randomUUID().slice(0, 8)}@j5.no`
+      const probeEmail = `supabase-pwn-${crypto.randomUUID().slice(0, 8)}@iapapi.com`
       const { data, error } = await client.auth.signUp({
         email: probeEmail,
         password: "SupabasePwnProbe123!",
