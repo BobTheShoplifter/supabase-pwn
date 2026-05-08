@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Loader2, Globe } from "lucide-react"
 import { toast } from "sonner"
 
 import { useSupabase, detectKeyType } from "@/lib/supabase-context"
@@ -72,6 +72,8 @@ export function InitForm() {
   const [key, setKey] = useState("")
   const [isOpen, setIsOpen] = useState(true)
   const [loading, setLoading] = useState(false)
+  const [extractUrl, setExtractUrl] = useState("")
+  const [extracting, setExtracting] = useState(false)
 
   // Load persisted config on mount
   useEffect(() => {
@@ -102,6 +104,49 @@ export function InitForm() {
       )
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleExtract() {
+    const target = extractUrl.trim()
+    if (!target || extracting) return
+
+    setExtracting(true)
+    try {
+      const res = await fetch("/api/extract-config", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: target }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data?.error ?? `Extraction failed (${res.status})`)
+        return
+      }
+
+      if (data.projectUrl) setUrl(data.projectUrl)
+      if (data.apiKey) setKey(data.apiKey)
+
+      if (data.projectUrl && data.apiKey) {
+        const kindLabel = data.keyKind ? ` (${data.keyKind})` : ""
+        toast.success(`Found Supabase config${kindLabel} — connecting…`)
+        try {
+          await initialize(data.projectUrl, data.apiKey)
+          saveConfig(data.projectUrl, data.apiKey)
+        } catch (err) {
+          toast.error(
+            err instanceof Error ? err.message : "Failed to initialize connection",
+          )
+        }
+      } else if (data.projectUrl) {
+        toast.warning("Found Supabase URL but no usable key")
+      } else {
+        toast.error("No Supabase config found in scanned scripts")
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Extraction failed")
+    } finally {
+      setExtracting(false)
     }
   }
 
@@ -158,6 +203,49 @@ export function InitForm() {
 
         <CollapsibleContent>
           <CardContent className="space-y-4">
+            {!initialized && (
+              <div className="space-y-2 rounded-md border border-dashed p-3">
+                <Label htmlFor="extract-url" className="flex items-center gap-2">
+                  <Globe className="h-3.5 w-3.5" />
+                  Extract from website URL
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="extract-url"
+                    type="url"
+                    placeholder="https://example.com"
+                    value={extractUrl}
+                    onChange={(e) => setExtractUrl(e.target.value)}
+                    disabled={extracting}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        handleExtract()
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleExtract}
+                    disabled={!extractUrl.trim() || extracting}
+                  >
+                    {extracting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Scanning…
+                      </>
+                    ) : (
+                      "Extract"
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Fetches the page and its JS bundles to find a Supabase URL and anon/publishable key.
+                </p>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="project-url">Project URL</Label>
               <Input
