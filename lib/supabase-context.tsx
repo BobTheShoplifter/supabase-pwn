@@ -82,6 +82,8 @@ export type SupabaseState = {
   session: Session | null
   schema: SchemaInfo | null
   logs: LogEntry[]
+  /** Identifiers harvested out-of-band (e.g. JS bundle scan) — feed AutoPwn's wordlists. */
+  hints: { tables: string[]; functions: string[] }
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +115,10 @@ type Action =
       rlsPolicies: RlsPolicy[]
     }
   }
+  | {
+    type: "MERGE_HINTS"
+    payload: { tables: string[]; functions: string[] }
+  }
 
 // ---------------------------------------------------------------------------
 // Context value shape
@@ -130,6 +136,7 @@ type SupabaseContextValue = SupabaseState & {
   disconnect: () => void
   discoverTables: (customNames?: string[]) => Promise<void>
   importSchemaDump: (sql: string) => void
+  mergeHints: (hints: { tables?: string[]; functions?: string[] }) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +155,7 @@ const initialState: SupabaseState = {
   session: null,
   schema: null,
   logs: [],
+  hints: { tables: [], functions: [] },
 }
 
 function reducer(state: SupabaseState, action: Action): SupabaseState {
@@ -180,7 +188,18 @@ function reducer(state: SupabaseState, action: Action): SupabaseState {
     case "CLEAR_LOGS":
       return { ...state, logs: [] }
     case "DISCONNECT":
-      return { ...initialState }
+      return { ...initialState, hints: { tables: [], functions: [] } }
+    case "MERGE_HINTS": {
+      const tableSet = new Set([...state.hints.tables, ...action.payload.tables])
+      const fnSet = new Set([...state.hints.functions, ...action.payload.functions])
+      return {
+        ...state,
+        hints: {
+          tables: [...tableSet].sort(),
+          functions: [...fnSet].sort(),
+        },
+      }
+    }
     case "MERGE_SCHEMA": {
       const existing = new Set(state.schema?.tables ?? [])
       const newTables = action.payload.tables.filter((t) => !existing.has(t))
@@ -455,7 +474,7 @@ function inferColumnType(value: unknown): string {
   return "text"
 }
 
-const TABLE_WORDLIST = [
+export const TABLE_WORDLIST = [
   // Auth & users
   "users", "profiles", "accounts", "user_profiles", "user_roles",
   "roles", "permissions", "role_permissions", "user_permissions",
@@ -515,6 +534,32 @@ const TABLE_WORDLIST = [
   "data", "records", "public", "private", "internal",
   "test", "tests", "test_data", "debug", "admin",
   "secrets", "private_data", "wallets", "balances",
+]
+
+export const FUNCTION_WORDLIST = [
+  // Generic
+  "hello", "test", "ping", "health", "status", "version",
+  "api", "process", "handler", "execute", "run",
+  // Webhooks & integrations
+  "webhook", "webhooks", "stripe-webhook", "github-webhook", "slack-webhook",
+  "stripe", "stripe-create-checkout", "stripe-portal", "checkout", "billing",
+  "paypal-webhook", "paddle-webhook",
+  // Email & notifications
+  "send-email", "send-mail", "email", "mailer", "notify", "notification",
+  "send-sms", "sms",
+  // Auth & users
+  "auth", "login", "signup", "register", "logout",
+  "delete-user", "delete-account", "create-user", "update-user", "invite",
+  "reset-password", "verify-email",
+  // Admin / privileged
+  "admin", "admin-action", "admin-delete", "internal", "cron", "task",
+  // AI / ML
+  "openai", "claude", "anthropic", "embed", "embeddings", "chat", "completion",
+  "generate", "summarize", "translate",
+  // Files
+  "upload", "download", "presign", "signed-url", "image", "thumbnail",
+  // Misc
+  "search", "feedback", "report", "export", "import", "sync",
 ]
 
 // ---------------------------------------------------------------------------
@@ -829,6 +874,17 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
     [addLog],
   )
 
+  // -- mergeHints ---------------------------------------------------------
+  const mergeHints = useCallback(
+    (hints: { tables?: string[]; functions?: string[] }) => {
+      const tables = hints.tables ?? []
+      const functions = hints.functions ?? []
+      if (tables.length === 0 && functions.length === 0) return
+      dispatch({ type: "MERGE_HINTS", payload: { tables, functions } })
+    },
+    [],
+  )
+
   // -- memoised context value --------------------------------------------
   const value = useMemo<SupabaseContextValue>(
     () => ({
@@ -840,8 +896,9 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
       disconnect,
       discoverTables,
       importSchemaDump,
+      mergeHints,
     }),
-    [state, initialize, addLog, clearLogs, signOut, disconnect, discoverTables, importSchemaDump],
+    [state, initialize, addLog, clearLogs, signOut, disconnect, discoverTables, importSchemaDump, mergeHints],
   )
 
   return (

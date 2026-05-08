@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Play,
   Square,
@@ -13,9 +13,29 @@ import {
   HardDrive,
   Key,
   Zap,
+  Download,
+  History,
+  Sparkles,
 } from "lucide-react"
 
-import { useSupabase } from "@/lib/supabase-context"
+import {
+  useSupabase,
+  TABLE_WORDLIST,
+  FUNCTION_WORDLIST,
+} from "@/lib/supabase-context"
+import {
+  diffHasChanges,
+  diffScans,
+  loadLastScan,
+  saveScan,
+  type ScanDiff,
+  type ScanRecord,
+} from "@/lib/scan-history"
+import {
+  downloadFile,
+  formatMarkdownReport,
+  reportFilenameBase,
+} from "@/lib/scan-report"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -83,6 +103,10 @@ type ScanConfig = {
   concurrency: number
   writeTesting: boolean
   customTables: string
+  /** Augment table list with the curated wordlist. */
+  useBuiltinTableWordlist: boolean
+  /** Augment table+function lists with identifiers harvested from JS bundles. */
+  useJsHints: boolean
 }
 
 type AbortSignal = { aborted: boolean }
@@ -206,7 +230,7 @@ function ResultSection({
 // ---------------------------------------------------------------------------
 
 export function AutoPwn() {
-  const { client, schema, addLog } = useSupabase()
+  const { client, schema, addLog, projectUrl, apiKey, keyType, hints, mergeHints } = useSupabase()
 
   // -- Config state ---------------------------------------------------------
   const [config, setConfig] = useState<ScanConfig>({
@@ -217,7 +241,27 @@ export function AutoPwn() {
     concurrency: 10,
     writeTesting: false,
     customTables: "",
+    useBuiltinTableWordlist: true,
+    useJsHints: true,
   })
+
+  // -- Scan history (persisted) --------------------------------------------
+  const [previousScan, setPreviousScan] = useState<ScanRecord | null>(null)
+  const [latestScan, setLatestScan] = useState<ScanRecord | null>(null)
+  const [diff, setDiff] = useState<ScanDiff | null>(null)
+
+  // Load the most recent persisted scan when the connected project changes
+  useEffect(() => {
+    if (!projectUrl) {
+      setPreviousScan(null)
+      setLatestScan(null)
+      setDiff(null)
+      return
+    }
+    setPreviousScan(loadLastScan(projectUrl))
+    setLatestScan(null)
+    setDiff(null)
+  }, [projectUrl])
 
   // -- Scan state -----------------------------------------------------------
   const [phase, setPhase] = useState<ScanPhase>("idle")
@@ -306,38 +350,107 @@ export function AutoPwn() {
       .map((t) => t.trim())
       .filter(Boolean)
 
-    const allTables = [...new Set([...schema.tables, ...customTableNames])]
-    const totalTables = allTables.length
+    const sources: string[][] = [schema.tables, customTableNames]
+    if (config.useJsHints && hints.tables.length > 0) sources.push(hints.tables)
+    if (config.useBuiltinTableWordlist) sources.push(TABLE_WORDLIST)
 
-    if (totalTables === 0) {
+    const allTables = [...new Set(sources.flat())]
+
+    if (allTables.length === 0) {
       addLog("warning", "No tables to test for RLS")
       setProgress(calculateProgress("database", 100))
       return
     }
 
     const results: ScanResult[] = []
+    const tested = new Set<string>()
+    /** New tables surfaced by PGRST205 server hints during scanning. */
+    const newHinted = new Set<string>()
 
-    // Build tasks for SELECT testing
-    const selectTasks = allTables.map((table, idx) => {
-      return async (): Promise<ScanResult> => {
-        if (abortRef.current.aborted) {
-          return { name: table, select: "error", details: "Aborted" }
+    /** Match "Perhaps you meant the table 'public.xxx'" */
+    const parseServerHint = (hint: string | null | undefined): string | null => {
+      if (!hint) return null
+      const m = hint.match(/perhaps you meant.*?'(?:public\.)?([^']+)'/i)
+      return m ? m[1] : null
+    }
+
+    const probeOne = async (
+      table: string,
+      idx: number,
+      total: number,
+    ): Promise<ScanResult> => {
+      if (abortRef.current.aborted) {
+        return { name: table, select: "error", details: "Aborted" }
+      }
+
+      setCurrentItem(`SELECT on ${table} (${idx + 1}/${total})`)
+
+      const result: ScanResult = { name: table }
+
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data, error } = await (client as any)
+          .from(table)
+          .select("*")
+          .limit(1)
+
+        if (error) {
+          const code = error.code ?? ""
+          const msg = (error.message ?? "").toLowerCase()
+
+          // Capture PGRST205 server hints — they often reveal real table names
+          // even when the probed name was wrong (e.g. "users" → "profiles").
+          if (code === "PGRST205") {
+            const hintedFromHint = parseServerHint(error.hint)
+            const hintedFromMsg = parseServerHint(error.message)
+            const hinted = hintedFromHint ?? hintedFromMsg
+            if (hinted && !tested.has(hinted)) newHinted.add(hinted)
+          }
+
+          if (
+            code === "42501" ||
+            msg.includes("denied") ||
+            msg.includes("rls") ||
+            msg.includes("permission") ||
+            msg.includes("policy")
+          ) {
+            result.select = "denied"
+          } else {
+            result.select = "error"
+          }
+          result.details = `SELECT: ${error.message}`
+        } else {
+          const rowCount = Array.isArray(data) ? data.length : 0
+          if (rowCount > 0) {
+            result.select = "allowed"
+            result.details = `SELECT returned ${rowCount} row(s) — DATA EXPOSED`
+          } else {
+            result.select = "empty"
+            result.details = `SELECT returned 200 OK but 0 rows (empty table or RLS filtering)`
+          }
         }
+      } catch (err) {
+        result.select = "error"
+        result.details =
+          err instanceof Error ? err.message : "Unknown SELECT error"
+      }
 
-        setCurrentItem(`SELECT on ${table} (${idx + 1}/${totalTables})`)
-
-        const result: ScanResult = { name: table }
-
+      // Write testing (INSERT then cleanup DELETE)
+      if (config.writeTesting) {
+        // INSERT test
         try {
+          setCurrentItem(`INSERT on ${table} (${idx + 1}/${total})`)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { data, error } = await (client as any)
+          const { error: insertError } = await (client as any)
             .from(table)
-            .select("*")
-            .limit(1)
+            .insert({
+              __supabase_pwn_probe: true,
+              _timestamp: Date.now(),
+            })
 
-          if (error) {
-            const code = error.code ?? ""
-            const msg = (error.message ?? "").toLowerCase()
+          if (insertError) {
+            const code = insertError.code ?? ""
+            const msg = (insertError.message ?? "").toLowerCase()
             if (
               code === "42501" ||
               msg.includes("denied") ||
@@ -345,110 +458,87 @@ export function AutoPwn() {
               msg.includes("permission") ||
               msg.includes("policy")
             ) {
-              result.select = "denied"
+              result.insert = "denied"
             } else {
-              result.select = "error"
+              result.insert = "error"
             }
-            result.details = `SELECT: ${error.message}`
           } else {
-            const rowCount = Array.isArray(data) ? data.length : 0
-            if (rowCount > 0) {
-              result.select = "allowed"
-              result.details = `SELECT returned ${rowCount} row(s) — DATA EXPOSED`
-            } else {
-              result.select = "empty"
-              result.details = `SELECT returned 200 OK but 0 rows (empty table or RLS filtering)`
-            }
+            result.insert = "allowed"
           }
-        } catch (err) {
-          result.select = "error"
-          result.details =
-            err instanceof Error ? err.message : "Unknown SELECT error"
+        } catch {
+          result.insert = "error"
         }
 
-        // Write testing (INSERT then cleanup DELETE)
-        if (config.writeTesting) {
-          // INSERT test
-          try {
-            setCurrentItem(`INSERT on ${table} (${idx + 1}/${totalTables})`)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { error: insertError } = await (client as any)
-              .from(table)
-              .insert({
-                __supabase_pwn_probe: true,
-                _timestamp: Date.now(),
-              })
+        // DELETE test (cleanup)
+        try {
+          setCurrentItem(`DELETE on ${table} (${idx + 1}/${total})`)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { error: deleteError } = await (client as any)
+            .from(table)
+            .delete()
+            .eq("__supabase_pwn_probe", true)
 
-            if (insertError) {
-              const code = insertError.code ?? ""
-              const msg = (insertError.message ?? "").toLowerCase()
-              if (
-                code === "42501" ||
-                msg.includes("denied") ||
-                msg.includes("rls") ||
-                msg.includes("permission") ||
-                msg.includes("policy")
-              ) {
-                result.insert = "denied"
-              } else {
-                result.insert = "error"
-              }
+          if (deleteError) {
+            const code = deleteError.code ?? ""
+            const msg = (deleteError.message ?? "").toLowerCase()
+            if (
+              code === "42501" ||
+              msg.includes("denied") ||
+              msg.includes("rls") ||
+              msg.includes("permission") ||
+              msg.includes("policy")
+            ) {
+              result.delete = "denied"
             } else {
-              result.insert = "allowed"
+              result.delete = "error"
             }
-          } catch {
-            result.insert = "error"
+          } else {
+            result.delete = "allowed"
           }
-
-          // DELETE test (cleanup)
-          try {
-            setCurrentItem(`DELETE on ${table} (${idx + 1}/${totalTables})`)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const { error: deleteError } = await (client as any)
-              .from(table)
-              .delete()
-              .eq("__supabase_pwn_probe", true)
-
-            if (deleteError) {
-              const code = deleteError.code ?? ""
-              const msg = (deleteError.message ?? "").toLowerCase()
-              if (
-                code === "42501" ||
-                msg.includes("denied") ||
-                msg.includes("rls") ||
-                msg.includes("permission") ||
-                msg.includes("policy")
-              ) {
-                result.delete = "denied"
-              } else {
-                result.delete = "error"
-              }
-            } else {
-              result.delete = "allowed"
-            }
-          } catch {
-            result.delete = "error"
-          }
-        } else {
-          result.insert = "skipped"
-          result.update = "skipped"
-          result.delete = "skipped"
+        } catch {
+          result.delete = "error"
         }
-
-        return result
+      } else {
+        result.insert = "skipped"
+        result.update = "skipped"
+        result.delete = "skipped"
       }
-    })
 
-    // Run SELECT tasks in batches
-    const batchResults = await runInBatches(
-      selectTasks,
-      config.concurrency,
-      abortRef.current,
-    )
+      return result
+    }
 
-    for (const r of batchResults) {
-      if (r && typeof r === "object" && "name" in r) {
-        results.push(r as ScanResult)
+    /** Run a wave of probes against `tables` and append to `results`. */
+    const runWave = async (tables: string[]) => {
+      const total = tables.length
+      const tasks = tables.map((t, i) => {
+        tested.add(t)
+        return () => probeOne(t, i, total)
+      })
+      const wave = await runInBatches(tasks, config.concurrency, abortRef.current)
+      for (const r of wave) {
+        if (r && typeof r === "object" && "name" in r) {
+          results.push(r as ScanResult)
+        }
+      }
+    }
+
+    // Wave 1: explicit + wordlist + JS hints
+    await runWave(allTables)
+
+    // Wave 2: PGRST205 server-suggested table names that we haven't tested yet
+    if (!abortRef.current.aborted) {
+      const wave2 = [...newHinted].filter((t) => !tested.has(t))
+      if (wave2.length > 0) {
+        addLog(
+          "info",
+          `Probing ${wave2.length} table(s) suggested by PGRST205 server hints…`,
+        )
+        await runWave(wave2)
+      }
+      // Persist newly-confirmed names into context hints so the DB explorer
+      // and future scans pick them up.
+      if (newHinted.size > 0) {
+        mergeHints({ tables: [...newHinted] })
       }
     }
 
@@ -456,13 +546,14 @@ export function AutoPwn() {
 
     const dataExposedCount = results.filter((r) => r.select === "allowed").length
     const emptyOkCount = results.filter((r) => r.select === "empty").length
+    const hintNote = newHinted.size > 0 ? ` (+${newHinted.size} from server hints)` : ""
     addLog(
       dataExposedCount > 0 ? "warning" : "success",
-      `Database RLS: ${dataExposedCount}/${results.length} tables expose data, ${emptyOkCount} return 200 OK (empty)`,
+      `Database RLS: ${dataExposedCount}/${results.length} tables expose data, ${emptyOkCount} return 200 OK (empty)${hintNote}`,
     )
 
     setProgress(calculateProgress("database", 100))
-  }, [client, schema, config, addLog, calculateProgress])
+  }, [client, schema, config, hints.tables, addLog, calculateProgress, mergeHints])
 
   // -- Phase 3: Storage Scanning --------------------------------------------
   const runStorageScan = useCallback(async () => {
@@ -664,58 +755,61 @@ export function AutoPwn() {
 
   // -- Phase 5: Edge Function Discovery -------------------------------------
   const runEdgeFunctionDiscovery = useCallback(async () => {
-    if (!client) return
+    if (!client || !projectUrl || !apiKey) return
 
     setPhase("functions")
     setProgressLabel("Edge Function Discovery")
 
-    const commonNames = [
-      "hello",
-      "test",
-      "api",
-      "webhook",
-      "stripe-webhook",
-      "send-email",
-      "notify",
-      "process",
-      "auth",
-      "admin",
-    ]
+    const fnSources: string[][] = [FUNCTION_WORDLIST]
+    if (config.useJsHints && hints.functions.length > 0) fnSources.push(hints.functions)
+    const commonNames = [...new Set(fnSources.flat())]
 
     const results: FunctionResult[] = []
     const totalFunctions = commonNames.length
+
+    // Why a raw fetch instead of client.functions.invoke():
+    //   1. invoke() throws SDK-wrapped errors whose .message rarely contains "404",
+    //      so the previous version classified almost everything as "found".
+    //   2. We need the real HTTP status to distinguish 404 (not deployed) from
+    //      anything else (deployed — even 401/4xx/5xx confirm existence).
+    // The functions gateway returns CORS headers on 404 responses, so the browser
+    // can read the status. If a deployed function lacks CORS, the fetch promise
+    // will reject — we treat that as "found" (the gateway routed to it).
+    const probeFunction = async (name: string): Promise<FunctionResult> => {
+      const url = `${projectUrl.replace(/\/$/, "")}/functions/v1/${encodeURIComponent(name)}`
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            apikey: apiKey,
+            Authorization: `Bearer ${apiKey}`,
+            "content-type": "application/json",
+          },
+          body: "{}",
+        })
+
+        if (res.status === 404) {
+          return { name, status: "not_found", statusCode: 404 }
+        }
+        // Anything else (200, 401, 4xx, 5xx) — function is deployed.
+        return { name, status: "found", statusCode: res.status }
+      } catch {
+        // TypeError ("Failed to fetch") usually = CORS or network. The gateway
+        // sets CORS on 404s, so a network failure most likely means the
+        // function exists but its handler doesn't allow our origin.
+        return { name, status: "found" }
+      }
+    }
 
     const tasks = commonNames.map((name, idx) => {
       return async (): Promise<FunctionResult> => {
         if (abortRef.current.aborted) {
           return { name, status: "error" }
         }
-
         setCurrentItem(
           `Probing function: ${name} (${idx + 1}/${totalFunctions})`,
         )
-
-        try {
-          const { error } = await client.functions.invoke(name)
-
-          if (error) {
-            const msg = (error.message ?? "").toLowerCase()
-            // FunctionsHttpError with 404-like messages or FunctionsRelayError
-            if (
-              msg.includes("404") ||
-              msg.includes("not found") ||
-              msg.includes("relay")
-            ) {
-              return { name, status: "not_found" }
-            }
-            // Other errors mean the function exists but errored
-            return { name, status: "found" }
-          }
-
-          return { name, status: "found" }
-        } catch {
-          return { name, status: "error" }
-        }
+        return probeFunction(name)
       }
     })
 
@@ -740,7 +834,7 @@ export function AutoPwn() {
     )
 
     setProgress(calculateProgress("functions", 100))
-  }, [client, config.concurrency, addLog, calculateProgress])
+  }, [client, projectUrl, apiKey, config.concurrency, config.useJsHints, hints.functions, addLog, calculateProgress])
 
   // =========================================================================
   // Start / Abort
@@ -757,6 +851,12 @@ export function AutoPwn() {
     setStorageResults([])
     setAuthResults([])
     setFunctionResults([])
+    setLatestScan(null)
+    setDiff(null)
+    // Capture the previous scan once at the start of this run, so the diff
+    // we compute when finishing reflects "current vs prior persisted run".
+    const priorRecord = projectUrl ? loadLastScan(projectUrl) : null
+    setPreviousScan(priorRecord)
 
     addLog("info", "AutoPwn scan started")
 
@@ -794,6 +894,8 @@ export function AutoPwn() {
       setProgressLabel("Scan Complete")
       setCurrentItem("")
       addLog("success", "AutoPwn scan completed")
+      // Persistence + diff are computed in the useEffect below — we read the
+      // committed React state there so results are not stale.
     } catch (err) {
       if (abortRef.current.aborted) {
         setPhase("idle")
@@ -812,6 +914,7 @@ export function AutoPwn() {
     client,
     schema,
     config,
+    projectUrl,
     addLog,
     runRecon,
     runDatabaseRls,
@@ -819,6 +922,77 @@ export function AutoPwn() {
     runAuthProbing,
     runEdgeFunctionDiscovery,
   ])
+
+  // After a successful scan, persist + diff against the prior run
+  useEffect(() => {
+    if (phase !== "complete" || scanning || !projectUrl) return
+    if (latestScan) return // already persisted this completion
+    const record: ScanRecord = {
+      schemaVersion: 1,
+      projectUrl,
+      keyType,
+      timestamp: new Date().toISOString(),
+      db: dbResults,
+      storage: storageResults,
+      auth: authResults,
+      functions: functionResults,
+    }
+    saveScan(record)
+    setLatestScan(record)
+    setDiff(diffScans(previousScan, record))
+  }, [
+    phase,
+    scanning,
+    projectUrl,
+    keyType,
+    dbResults,
+    storageResults,
+    authResults,
+    functionResults,
+    previousScan,
+    latestScan,
+  ])
+
+  // Export helpers --------------------------------------------------------
+  const exportableScan = useMemo<ScanRecord | null>(() => {
+    if (latestScan) return latestScan
+    if (phase !== "complete" || !projectUrl) return null
+    return {
+      schemaVersion: 1,
+      projectUrl,
+      keyType,
+      timestamp: new Date().toISOString(),
+      db: dbResults,
+      storage: storageResults,
+      auth: authResults,
+      functions: functionResults,
+    }
+  }, [
+    latestScan,
+    phase,
+    projectUrl,
+    keyType,
+    dbResults,
+    storageResults,
+    authResults,
+    functionResults,
+  ])
+
+  const handleExportMarkdown = useCallback(() => {
+    if (!exportableScan) return
+    const md = formatMarkdownReport(exportableScan)
+    downloadFile(`${reportFilenameBase(exportableScan)}.md`, md, "text/markdown")
+  }, [exportableScan])
+
+  const handleExportJson = useCallback(() => {
+    if (!exportableScan) return
+    const json = JSON.stringify(exportableScan, null, 2)
+    downloadFile(
+      `${reportFilenameBase(exportableScan)}.json`,
+      json,
+      "application/json",
+    )
+  }, [exportableScan])
 
   const handleAbort = useCallback(() => {
     abortRef.current.aborted = true
@@ -857,8 +1031,79 @@ export function AutoPwn() {
     )
   }
 
+  // Key-kind warning copy ---------------------------------------------------
+  const keyBanner = (() => {
+    switch (keyType) {
+      case "service_role":
+        return {
+          tone: "danger" as const,
+          title: "Service Role key in use",
+          body:
+            "This key bypasses Row Level Security. Findings here reflect a fully-privileged admin, NOT what an unauthenticated attacker would see. Use an anon or publishable key to assess real exposure.",
+        }
+      case "secret":
+        return {
+          tone: "danger" as const,
+          title: "Secret key in use",
+          body:
+            "Server-side `sb_secret_…` keys grant elevated privileges. Findings reflect a privileged caller, not an external attacker. Re-run with an anon/publishable key to gauge real-world risk.",
+        }
+      case "publishable":
+        return {
+          tone: "info" as const,
+          title: "Publishable key",
+          body:
+            "Browser-safe key. Probes here approximate an unauthenticated attacker's view.",
+        }
+      case "anon":
+        return {
+          tone: "info" as const,
+          title: "Anon key",
+          body:
+            "Probes here approximate an unauthenticated attacker's view via PostgREST + RLS.",
+        }
+      default:
+        return null
+    }
+  })()
+
   return (
     <div className="space-y-4">
+      {/* ------------------------------------------------------------------- */}
+      {/* Key-kind banner                                                     */}
+      {/* ------------------------------------------------------------------- */}
+      {keyBanner && (
+        <div
+          className={
+            keyBanner.tone === "danger"
+              ? "rounded-md border border-red-600/30 bg-red-600/5 p-3"
+              : "rounded-md border border-blue-600/30 bg-blue-600/5 p-3"
+          }
+        >
+          <div className="flex gap-2 items-start">
+            <ShieldAlert
+              className={
+                keyBanner.tone === "danger"
+                  ? "size-4 text-red-400 mt-0.5 shrink-0"
+                  : "size-4 text-blue-400 mt-0.5 shrink-0"
+              }
+            />
+            <div className="text-xs">
+              <div
+                className={
+                  keyBanner.tone === "danger"
+                    ? "font-medium text-red-300"
+                    : "font-medium text-blue-300"
+                }
+              >
+                {keyBanner.title}
+              </div>
+              <p className="text-muted-foreground mt-0.5">{keyBanner.body}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ------------------------------------------------------------------- */}
       {/* Configuration                                                       */}
       {/* ------------------------------------------------------------------- */}
@@ -1002,6 +1247,43 @@ export function AutoPwn() {
             </p>
           </div>
 
+          {/* Wordlist + JS hint sources */}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="flex items-center justify-between rounded-md border px-3 py-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="size-4 text-muted-foreground" />
+                <Label htmlFor="toggle-wordlist" className="cursor-pointer text-sm">
+                  Curated wordlist ({TABLE_WORDLIST.length})
+                </Label>
+              </div>
+              <Switch
+                id="toggle-wordlist"
+                checked={config.useBuiltinTableWordlist}
+                onCheckedChange={(v) => updateConfig("useBuiltinTableWordlist", v)}
+                disabled={scanning}
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-md border px-3 py-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="size-4 text-muted-foreground" />
+                <Label htmlFor="toggle-js-hints" className="cursor-pointer text-sm">
+                  JS-discovered ({hints.tables.length}/{hints.functions.length})
+                </Label>
+              </div>
+              <Switch
+                id="toggle-js-hints"
+                checked={config.useJsHints}
+                onCheckedChange={(v) => updateConfig("useJsHints", v)}
+                disabled={scanning || (hints.tables.length === 0 && hints.functions.length === 0)}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground -mt-1">
+            JS-discovered identifiers come from <code>from(&apos;…&apos;)</code> /{" "}
+            <code>functions.invoke(&apos;…&apos;)</code> calls captured by the
+            URL extractor.
+          </p>
+
           <Separator />
 
           {/* Start / Abort button */}
@@ -1057,9 +1339,33 @@ export function AutoPwn() {
       {phase === "complete" && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <ShieldCheck className="size-4" />
-              Scan Summary
+            <CardTitle className="flex items-center justify-between text-base">
+              <span className="flex items-center gap-2">
+                <ShieldCheck className="size-4" />
+                Scan Summary
+              </span>
+              <span className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleExportMarkdown}
+                  disabled={!exportableScan}
+                  className="gap-1.5"
+                >
+                  <Download className="size-3.5" />
+                  Markdown
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleExportJson}
+                  disabled={!exportableScan}
+                  className="gap-1.5"
+                >
+                  <Download className="size-3.5" />
+                  JSON
+                </Button>
+              </span>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1130,6 +1436,110 @@ export function AutoPwn() {
                 </Badge>
               )}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ------------------------------------------------------------------- */}
+      {/* Diff vs previous scan                                               */}
+      {/* ------------------------------------------------------------------- */}
+      {phase === "complete" && diff && previousScan && diffHasChanges(diff) && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <History className="size-4" />
+              Changes since {new Date(previousScan.timestamp).toLocaleString()}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {diff.newReadable.length > 0 && (
+              <div>
+                <Badge className="bg-red-600/20 text-red-400 border-red-600/30 mr-2">
+                  +{diff.newReadable.length} newly readable
+                </Badge>
+                <span className="text-xs text-muted-foreground font-mono">
+                  {diff.newReadable.join(", ")}
+                </span>
+              </div>
+            )}
+            {diff.noLongerReadable.length > 0 && (
+              <div>
+                <Badge className="bg-green-600/20 text-green-400 border-green-600/30 mr-2">
+                  -{diff.noLongerReadable.length} fixed (no longer readable)
+                </Badge>
+                <span className="text-xs text-muted-foreground font-mono">
+                  {diff.noLongerReadable.join(", ")}
+                </span>
+              </div>
+            )}
+            {diff.newWritable.length > 0 && (
+              <div>
+                <Badge className="bg-red-600/20 text-red-400 border-red-600/30 mr-2">
+                  +{diff.newWritable.length} newly writable
+                </Badge>
+                <span className="text-xs text-muted-foreground font-mono">
+                  {diff.newWritable.join(", ")}
+                </span>
+              </div>
+            )}
+            {diff.noLongerWritable.length > 0 && (
+              <div>
+                <Badge className="bg-green-600/20 text-green-400 border-green-600/30 mr-2">
+                  -{diff.noLongerWritable.length} fixed (no longer writable)
+                </Badge>
+                <span className="text-xs text-muted-foreground font-mono">
+                  {diff.noLongerWritable.join(", ")}
+                </span>
+              </div>
+            )}
+            {diff.newPublicBuckets.length > 0 && (
+              <div>
+                <Badge className="bg-yellow-600/20 text-yellow-400 border-yellow-600/30 mr-2">
+                  +{diff.newPublicBuckets.length} new public bucket(s)
+                </Badge>
+                <span className="text-xs text-muted-foreground font-mono">
+                  {diff.newPublicBuckets.join(", ")}
+                </span>
+              </div>
+            )}
+            {diff.newListableBuckets.length > 0 && (
+              <div>
+                <Badge className="bg-yellow-600/20 text-yellow-400 border-yellow-600/30 mr-2">
+                  +{diff.newListableBuckets.length} new listable bucket(s)
+                </Badge>
+                <span className="text-xs text-muted-foreground font-mono">
+                  {diff.newListableBuckets.join(", ")}
+                </span>
+              </div>
+            )}
+            {diff.newAuthEnabled.length > 0 && (
+              <div>
+                <Badge className="bg-yellow-600/20 text-yellow-400 border-yellow-600/30 mr-2">
+                  +{diff.newAuthEnabled.length} auth feature(s) opened
+                </Badge>
+                <span className="text-xs text-muted-foreground font-mono">
+                  {diff.newAuthEnabled.join(", ")}
+                </span>
+              </div>
+            )}
+            {diff.newFunctions.length > 0 && (
+              <div>
+                <Badge variant="secondary" className="mr-2">
+                  +{diff.newFunctions.length} new function(s)
+                </Badge>
+                <span className="text-xs text-muted-foreground font-mono">
+                  {diff.newFunctions.join(", ")}
+                </span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+      {phase === "complete" && diff && previousScan && !diffHasChanges(diff) && (
+        <Card>
+          <CardContent className="py-3 text-xs text-muted-foreground flex items-center gap-2">
+            <History className="size-3.5" />
+            No changes since previous scan ({new Date(previousScan.timestamp).toLocaleString()}).
           </CardContent>
         </Card>
       )}

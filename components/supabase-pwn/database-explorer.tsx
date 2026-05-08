@@ -1079,7 +1079,7 @@ function RlsPoliciesTab({
 // ---------------------------------------------------------------------------
 
 export function DatabaseExplorer() {
-  const { client, schema, discoverTables, importSchemaDump, addLog } = useSupabase()
+  const { client, schema, hints, discoverTables, importSchemaDump, addLog } = useSupabase()
 
   const [selectedTable, setSelectedTable] = useState("")
   const [discovering, setDiscovering] = useState(false)
@@ -1095,8 +1095,31 @@ export function DatabaseExplorer() {
   const [addTableName, setAddTableName] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const tables = schema?.tables ?? []
+  const schemaTables = schema?.tables ?? []
   const rlsPolicies = schema?.rlsPolicies ?? []
+
+  // Tables shown in the selector = confirmed schema tables ∪ JS-discovered hints
+  // (de-duped). Hinted-only tables are marked so the user knows they're unverified.
+  const tableEntries = useMemo(() => {
+    const schemaSet = new Set(schemaTables)
+    const seen = new Set<string>()
+    const entries: { name: string; hinted: boolean }[] = []
+    for (const t of schemaTables) {
+      if (seen.has(t)) continue
+      seen.add(t)
+      entries.push({ name: t, hinted: false })
+    }
+    for (const t of hints.tables) {
+      if (seen.has(t)) continue
+      seen.add(t)
+      entries.push({ name: t, hinted: !schemaSet.has(t) })
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name))
+    return entries
+  }, [schemaTables, hints.tables])
+
+  const tables = tableEntries.map((e) => e.name)
+  const hintedCount = tableEntries.filter((e) => e.hinted).length
 
   const selectedColumns = useMemo(() => {
     if (!schema || !selectedTable) return []
@@ -1157,9 +1180,16 @@ export function DatabaseExplorer() {
             <SelectValue placeholder={tables.length === 0 ? "No tables — bruteforce to discover" : "Select a table or view"} />
           </SelectTrigger>
           <SelectContent>
-            {[...tables].sort((a, b) => a.localeCompare(b)).map((t) => (
-              <SelectItem key={t} value={t}>
-                {t}
+            {tableEntries.map((e) => (
+              <SelectItem key={e.name} value={e.name}>
+                <span className="flex items-center gap-2">
+                  <span>{e.name}</span>
+                  {e.hinted && (
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 leading-tight">
+                      js
+                    </Badge>
+                  )}
+                </span>
               </SelectItem>
             ))}
           </SelectContent>
@@ -1226,7 +1256,10 @@ export function DatabaseExplorer() {
             {showSchemaImport ? "Hide Schema Import" : "Import Schema Dump"}
           </Button>
           {tables.length > 0 && (
-            <p className="text-xs text-muted-foreground">{tables.length} table(s) discovered</p>
+            <p className="text-xs text-muted-foreground">
+              {tables.length} table(s)
+              {hintedCount > 0 ? ` (${hintedCount} from JS)` : ""}
+            </p>
           )}
           {rlsPolicies.length > 0 && (
             <p className="text-xs text-muted-foreground">{rlsPolicies.length} RLS polic{rlsPolicies.length === 1 ? "y" : "ies"}</p>
